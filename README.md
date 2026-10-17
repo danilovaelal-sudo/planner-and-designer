@@ -6,7 +6,7 @@
 
 ## GitHub Pages
 
-Адрес приложения: https://danilovaelal-sudo.github.io/planner-and-designer/
+Адрес после первой публикации: https://danilovaelal-sudo.github.io/planner-and-designer/
 
 Workflow `Deploy planner to GitHub Pages` проверяет тесты, собирает приложение и публикует `dist/` при изменениях в `main`. Его также можно запустить вручную во вкладке Actions. В настройках репозитория **Settings → Pages → Source** должен быть выбран **GitHub Actions**.
 
