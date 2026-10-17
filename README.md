@@ -4,6 +4,14 @@
 
 ![Первый прототип планировщика](docs/preview-desktop.png)
 
+## GitHub Pages
+
+Адрес приложения: https://danilovaelal-sudo.github.io/planner-and-designer/
+
+Workflow `Deploy planner to GitHub Pages` проверяет тесты, собирает приложение и публикует `dist/` при изменениях в `main`. Его также можно запустить вручную во вкладке Actions. В настройках репозитория **Settings → Pages → Source** должен быть выбран **GitHub Actions**.
+
+Сборка использует относительные пути к ресурсам, поэтому шрифты, стили, JavaScript и значок приложения загружаются из пути репозитория.
+
 ## Запуск
 
 Требуется Node.js 22.12+ и npm.
