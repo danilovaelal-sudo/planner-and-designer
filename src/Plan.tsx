@@ -16,14 +16,16 @@ export function ModuleGlyph({kind,color='#a5ad92'}:{kind:string;color?:string}) 
   </svg>;
 }
 
-export default function Plan({project,selected,onSelect,onMove,layer,showGrid}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;onMove:(c:Cabinet)=>void;layer:'base'|'wall';showGrid:boolean}) {
+export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zoom=1,focus=null}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;onMove:(c:Cabinet)=>void;layer:'base'|'wall';showGrid:boolean;zoom?:number;focus?:string|null}) {
   const svgRef=useRef<SVGSVGElement>(null);
   const drag=useRef<{cabinet:Cabinet;dx:number;dz:number}|null>(null);
   const [preview,setPreview]=useState<Cabinet|null>(null);
   const point=(e:React.PointerEvent)=>{const p=new DOMPoint(e.clientX,e.clientY);const matrix=svgRef.current!.getScreenCTM()!;return p.matrixTransform(matrix.inverse());};
   const {width:w,depth:d}=project.room;
+  const focal=project.cabinets.find(c=>c.id===focus),vw=(w+800)/zoom,vh=(d+750)/zoom;
+  const cx=focal?.x??(w/2-40),cz=focal?.z??(d/2+25);
   const items=project.cabinets.filter(c=>layer==='wall'?typeOf(c.kind).category==='wall':typeOf(c.kind).category!=='wall');
-  return <svg ref={svgRef} className="plan-svg" viewBox={`-440 -350 ${w+800} ${d+750}`} role="img" aria-label="План кухни сверху. Перетаскивайте модули для расстановки."
+  return <svg ref={svgRef} className="plan-svg" viewBox={`${cx-vw/2} ${cz-vh/2} ${vw} ${vh}`} role="img" aria-label="План кухни сверху. Перетаскивайте модули для расстановки."
     onPointerMove={e=>{if(!drag.current)return;const p=point(e),c=drag.current;setPreview(snap({...c.cabinet,x:p.x-c.dx,z:p.y-c.dz},project));}}
     onPointerUp={e=>{if(!drag.current)return;if(preview)onMove(preview);drag.current=null;setPreview(null);e.currentTarget.releasePointerCapture(e.pointerId);}}
     onPointerCancel={()=>{drag.current=null;setPreview(null);}}

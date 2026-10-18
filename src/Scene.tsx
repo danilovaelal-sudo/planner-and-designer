@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { FRONTS, WORKTOPS, typeOf } from './model';
+import { FRONTS, WORKTOPS, bounds, typeOf } from './model';
 import type { Cabinet, Material, Project } from './model';
 
 function surface(m: Material, textures: THREE.Texture[]) {
@@ -125,30 +125,50 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
   return root;
 }
 
-export default function Scene({project,selected,onSelect,resetKey,onReady}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;resetKey:number;onReady:(canvas:HTMLCanvasElement|null)=>void}) {
+export default function Scene({project,selected,onSelect,resetKey,onReady,cameraMode='kitchen',zoom=1}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;resetKey:number;onReady:(canvas:HTMLCanvasElement|null)=>void;cameraMode?:'kitchen'|'room'|'selected';zoom?:number}) {
   const host=useRef<HTMLDivElement>(null);
   const rendererRef=useRef<THREE.WebGLRenderer|null>(null);
   const cameraRef=useRef<THREE.PerspectiveCamera|null>(null);
   const sceneRef=useRef<THREE.Scene|null>(null);
   const controlsRef=useRef<OrbitControls|null>(null);
+  const dirtyRef=useRef(true);
   const clickRef=useRef(onSelect);clickRef.current=onSelect;
   const readyRef=useRef(onReady);readyRef.current=onReady;
+  const stateRef=useRef({project,selected,cameraMode,zoom});stateRef.current={project,selected,cameraMode,zoom};
+  const fitRef=useRef<()=>void>(()=>{});
   const [failed,setFailed]=useState(false);
   const initRoom=useRef(project.room);
   useEffect(()=>{
     const el=host.current!;let renderer:THREE.WebGLRenderer;
     try{renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});}catch{setFailed(true);return;}
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.35;
+    const mobile=window.matchMedia('(max-width:800px)').matches;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio,mobile?1.5:2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.35;
     el.appendChild(renderer.domElement);rendererRef.current=renderer;readyRef.current(renderer.domElement);
     const scene=new THREE.Scene();scene.background=new THREE.Color('#eeece6');sceneRef.current=scene;
     const camera=new THREE.PerspectiveCamera(37,1,.01,80);cameraRef.current=camera;
     const controls=new OrbitControls(camera,renderer.domElement);controlsRef.current=controls;controls.enableDamping=true;controls.dampingFactor=.08;controls.maxPolarAngle=Math.PI/2-.025;controls.minDistance=2;controls.maxDistance=18;
-    const s=Math.max(initRoom.current.width,initRoom.current.depth)/1000;
-    camera.position.set(-s*1.08,s*.87,s*1.25);controls.target.set(0,.95,0);controls.update();
+    fitRef.current=()=>{
+      const {project:p,selected:id,cameraMode:mode,zoom:magnification}=stateRef.current;
+      const w=p.room.width/1000,d=p.room.depth/1000;
+      const box=new THREE.Box3();
+      const items=mode==='selected'&&id?p.cabinets.filter(c=>c.id===id):p.cabinets;
+      if(mode==='room'||!items.length){box.set(new THREE.Vector3(-w/2,0,-d/2),new THREE.Vector3(w/2,p.room.height/1000,d/2));}
+      else for(const c of items){const b=bounds(c),t=typeOf(c.kind);box.expandByPoint(new THREE.Vector3(b.minX/1000-w/2,t.elevation/1000,b.minZ/1000-d/2));box.expandByPoint(new THREE.Vector3(b.maxX/1000-w/2,(t.elevation+t.height)/1000,b.maxZ/1000-d/2));}
+      const center=box.getCenter(new THREE.Vector3()),direction=new THREE.Vector3(-1,.72,1.35).normalize();
+      const right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),direction).normalize(),up=new THREE.Vector3().crossVectors(direction,right).normalize();
+      const tan=Math.tan(THREE.MathUtils.degToRad(camera.fov/2));let distance=1.5;
+      for(const x of [box.min.x,box.max.x])for(const y of [box.min.y,box.max.y])for(const z of [box.min.z,box.max.z]){
+        const delta=new THREE.Vector3(x,y,z).sub(center);
+        distance=Math.max(distance,delta.dot(direction)+Math.max(Math.abs(delta.dot(up))/tan,Math.abs(delta.dot(right))/(tan*camera.aspect)));
+      }
+      distance=distance*1.18/magnification;
+      controls.maxDistance=Math.max(18,distance*2);camera.zoom=1;camera.position.copy(center).addScaledVector(direction,distance);controls.target.copy(center);camera.updateProjectionMatrix();controls.update();dirtyRef.current=true;
+    };
+    fitRef.current();
     scene.add(new THREE.HemisphereLight('#fff9ec','#858a76',2.4));
-    const sun=new THREE.DirectionalLight('#fff7e8',3.4);sun.position.set(-3,7,5);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-8;sun.shadow.camera.right=8;sun.shadow.camera.top=8;sun.shadow.camera.bottom=-8;sun.shadow.normalBias=.035;sun.shadow.bias=-.0001;sun.shadow.radius=4;scene.add(sun);
+    const sun=new THREE.DirectionalLight('#fff7e8',3.4);sun.position.set(-3,7,5);sun.castShadow=true;sun.shadow.mapSize.set(mobile?1024:2048,mobile?1024:2048);sun.shadow.camera.left=-8;sun.shadow.camera.right=8;sun.shadow.camera.top=8;sun.shadow.camera.bottom=-8;sun.shadow.normalBias=.035;sun.shadow.bias=-.0001;sun.shadow.radius=4;scene.add(sun);
     const fill=new THREE.DirectionalLight('#edf5f5',1.4);fill.position.set(4,3,-1);scene.add(fill);
-    const resize=new ResizeObserver(()=>{if(el.clientWidth&&el.clientHeight){renderer.setSize(el.clientWidth,el.clientHeight);camera.aspect=el.clientWidth/el.clientHeight;camera.zoom=Math.min(1,camera.aspect/1.25);camera.updateProjectionMatrix();}});resize.observe(el);
+    const resize=new ResizeObserver(()=>{if(el.clientWidth&&el.clientHeight){renderer.setSize(el.clientWidth,el.clientHeight);camera.aspect=el.clientWidth/el.clientHeight;fitRef.current();}});resize.observe(el);
     const raycaster=new THREE.Raycaster();let down={x:0,y:0};
     const pointerdown=(e:PointerEvent)=>{down={x:e.clientX,y:e.clientY};};
     const pointerup=(e:PointerEvent)=>{
@@ -159,13 +179,13 @@ export default function Scene({project,selected,onSelect,resetKey,onReady}:{proj
       clickRef.current(null);
     };
     renderer.domElement.addEventListener('pointerdown',pointerdown);renderer.domElement.addEventListener('pointerup',pointerup);
-    renderer.setAnimationLoop(()=>{controls.update();renderer.render(scene,camera);});
+    renderer.setAnimationLoop(()=>{if(controls.update()||dirtyRef.current){renderer.render(scene,camera);dirtyRef.current=false;}});
     return()=>{resize.disconnect();renderer.setAnimationLoop(null);controls.dispose();renderer.domElement.removeEventListener('pointerdown',pointerdown);renderer.domElement.removeEventListener('pointerup',pointerup);renderer.dispose();renderer.domElement.remove();readyRef.current(null);rendererRef.current=null;sceneRef.current=null;};
   },[]);
   useEffect(()=>{
-    if(!sceneRef.current) return;const textures:THREE.Texture[]=[];const scene=sceneRef.current;const root=populate(scene,project,selected,textures);
+    if(!sceneRef.current) return;const textures:THREE.Texture[]=[];const scene=sceneRef.current;const root=populate(scene,project,selected,textures);dirtyRef.current=true;
     return()=>{scene.remove(root);const materials=new Set<THREE.Material>();root.traverse(obj=>{if(obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments){obj.geometry.dispose();if(Array.isArray(obj.material))obj.material.forEach(m=>materials.add(m));else materials.add(obj.material);}});materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());};
   },[project,selected]);
-  useEffect(()=>{const camera=cameraRef.current,controls=controlsRef.current;if(!camera||!controls)return;const s=Math.max(project.room.width,project.room.depth)/1000;camera.position.set(-s*1.08,s*.87,s*1.25);controls.target.set(0,.95,0);controls.update();},[resetKey,project.room.width,project.room.depth]);
+  useEffect(()=>{fitRef.current();},[resetKey,project.room.width,project.room.depth,project.cabinets.length,cameraMode,zoom,cameraMode==='selected'?selected:null]);
   return <div ref={host} className="scene-host" aria-label="Интерактивная 3D-модель кухни">{failed&&<div className="scene-error"><strong>3D недоступен в этом браузере</strong><p>Используйте вид «План 2D» или включите аппаратное ускорение.</p></div>}</div>;
 }

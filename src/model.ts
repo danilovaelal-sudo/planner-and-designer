@@ -115,6 +115,34 @@ export function findPlacement(kind: Kind, width: number, project: Project, wall:
   }
   return null;
 }
+
+export type KitchenLayout = 'straight' | 'corner' | 'empty';
+export function nudgeCabinet(c: Cabinet, dx: number, dz: number, room: Room): Cabinet {
+  const b=bounds(c),hx=(b.maxX-b.minX)/2,hz=(b.maxZ-b.minZ)/2;
+  return {...c,x:Math.max(hx,Math.min(room.width-hx,c.x+dx)),z:Math.max(hz,Math.min(room.depth-hz,c.z+dz))};
+}
+export function resizeCabinet(c: Cabinet, width: number, room: Room): Cabinet {
+  const delta=(width-c.width)/2;
+  return nudgeCabinet({...c,width,x:c.x+(c.rotation%180===0?delta:0),z:c.z+(c.rotation%180!==0?delta:0)},0,0,room);
+}
+/** Start a layout in the user's room; never replace their measurements with a demo room. */
+export function createKitchen(room: Room, layout: KitchenLayout): Project {
+  const project: Project = {version:1,name:'Моя кухня',room:{...room},cabinets:[],finishes:{lower:'sage',upper:'oak',worktop:'limestone',handle:'brass',floor:'oak',wall:'cream'}};
+  if(layout==='empty')return project;
+  if(layout==='corner')project.cabinets.push(cabinet('corner',900,room.width-450,450));
+  for(const kind of ['fridge','sink','oven','drawers'] as const){
+    const next=findPlacement(kind,600,project,'A') || (layout==='corner'?findPlacement(kind,600,project,'B'):null);
+    if(next)project.cabinets.push(next);
+  }
+  // An open stretch is intentional: users can add and change modules themselves.
+  for(const c of [...project.cabinets]){
+    if(!['sink','drawers'].includes(c.kind))continue;
+    const wall=c.rotation===0?'A':'B';
+    const upper=cabinet('wall',c.width,wall==='A'?c.x:room.width-175,wall==='A'?175:c.z,c.rotation);
+    if(!project.cabinets.some(other=>intersects(other,upper)))project.cabinets.push(upper);
+  }
+  return project;
+}
 export const STORAGE_KEY='kitchen-planner:project:v1';
 export const VARIANTS_KEY='kitchen-planner:variants:v1';
 export function parseProject(value: unknown): Project {

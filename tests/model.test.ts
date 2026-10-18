@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bounds, cabinet, findPlacement, intersects, isInside, issues, parseProject, snap, starter } from '../src/model';
+import { bounds, cabinet, createKitchen, findPlacement, intersects, isInside, issues, nudgeCabinet, parseProject, resizeCabinet, snap, starter } from '../src/model';
 
 describe('kitchen geometry',()=>{
   it('starts with valid straight and corner layouts',()=>{
@@ -56,5 +56,49 @@ describe('project interchange',()=>{
     const p=starter();expect(()=>parseProject({...p,room:{...p.room,width:Infinity}})).toThrow();
     expect(()=>parseProject({...p,finishes:{...p.finishes,lower:'unknown'}})).toThrow();
     expect(()=>parseProject({...p,room:{...p.room,windowOffset:2900}})).toThrow();
+  });
+});
+
+describe('guided kitchen creation',()=>{
+  it('keeps the entered room dimensions and opening parameters for both layouts',()=>{
+    const room={...starter().room,width:4200,depth:2800,height:2500,windowOffset:300,windowWidth:1000};
+    for(const layout of ['straight','corner'] as const){
+      const p=createKitchen(room,layout);
+      expect(p.room).toEqual(room);expect(p.cabinets.length).toBeGreaterThan(0);expect(issues(p)).toEqual([]);
+      expect(parseProject(p)).toEqual(p);
+    }
+  });
+  it('creates an empty room when the user chooses to assemble from scratch',()=>{
+    const room=starter().room,p=createKitchen(room,'empty');
+    expect(p.cabinets).toEqual([]);expect(p.room).toEqual(room);
+  });
+  it('only inserts modules that fit, including in small rooms',()=>{
+    for(const width of [1800,2400,3600,6000])for(const depth of [1800,3000,5500])for(const layout of ['straight','corner'] as const){
+      const p=createKitchen({...starter().room,width,depth,window:false},layout);
+      expect(issues(p),`${layout}: ${width} × ${depth}`).toEqual([]);
+    }
+  });
+  it('leaves free space for the next user-added module in an ordinary room',()=>{
+    const p=createKitchen(starter().room,'straight');
+    expect(findPlacement('base',600,p,'A')).not.toBeNull();
+  });
+  it('moves by an exact step without snapping back to a nearby neighbour',()=>{
+    const room=starter().room,c=cabinet('base',600,300,300);
+    expect(nudgeCabinet(c,50,0,room).x).toBe(350);
+    expect(nudgeCabinet(c,0,50,room).z).toBe(350);
+    expect(nudgeCabinet(c,-50,-50,room)).toEqual(c);
+  });
+  it('clamps touch movement using the rotated footprint',()=>{
+    const room=starter().room,c=cabinet('base',800,3200,2500,270);
+    const moved=nudgeCabinet(c,2000,2000,room);
+    expect(moved.x).toBe(3300);expect(moved.z).toBe(2600);
+    expect(isInside(moved,room)).toBe(true);
+  });
+  it('keeps the near edge when resizing a unit instead of pushing it outside the room',()=>{
+    const room=starter().room;
+    const back=resizeCabinet(cabinet('base',600,300,300),800,room);
+    const side=resizeCabinet(cabinet('base',600,3300,300,270),800,room);
+    expect(bounds(back).minX).toBe(0);expect(bounds(side).minZ).toBe(0);
+    expect(isInside(back,room)).toBe(true);expect(isInside(side,room)).toBe(true);
   });
 });
