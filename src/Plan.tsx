@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
-import { FRONTS, snap, typeOf } from './model';
-import type { Cabinet, Project, Wall } from './model';
+import { FRONTS, cabinetIssues, snap, typeOf } from './model';
+import type { Cabinet, Project, SnapOptions, Wall } from './model';
+import CabinetGuides from './CabinetGuides';
 import RoomDrawing, { Dimension } from './RoomDrawing';
 import { wallFrame, openingSegments } from './room';
 import type { RoomSelection } from './room';
@@ -19,7 +20,7 @@ export function ModuleGlyph({kind,color='#a5ad92'}:{kind:string;color?:string}) 
   </svg>;
 }
 
-export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zoom=1,focus=null,roomMode=false,roomSelection=null,onSelectRoom}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;onMove:(c:Cabinet)=>void;layer:'base'|'wall';showGrid:boolean;zoom?:number;focus?:string|null;roomMode?:boolean;roomSelection?:RoomSelection;onSelectRoom?:(s:RoomSelection)=>void}) {
+export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zoom=1,focus=null,roomMode=false,roomSelection=null,onSelectRoom,snapOptions,minPassage=900}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;onMove:(c:Cabinet)=>void;layer:'base'|'wall';showGrid:boolean;zoom?:number;focus?:string|null;roomMode?:boolean;roomSelection?:RoomSelection;onSelectRoom?:(s:RoomSelection)=>void;snapOptions?:SnapOptions;minPassage?:number}) {
   const svgRef=useRef<SVGSVGElement>(null);
   const drag=useRef<{cabinet:Cabinet;dx:number;dz:number}|null>(null);
   const [preview,setPreview]=useState<Cabinet|null>(null);
@@ -29,7 +30,7 @@ export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zo
   const cx=focal?.x??(w/2-40),cz=focal?.z??(d/2+25);
   const items=project.cabinets.filter(c=>layer==='wall'?typeOf(c.kind).category==='wall':typeOf(c.kind).category!=='wall');
   return <svg ref={svgRef} className={`plan-svg ${roomMode?'room-plan':''}`} viewBox={`${cx-vw/2} ${cz-vh/2} ${vw} ${vh}`} role="img" aria-label="План комнаты сверху. Выберите стену или проём для настройки."
-    onPointerMove={e=>{if(!drag.current)return;const p=point(e),c=drag.current;setPreview(snap({...c.cabinet,x:p.x-c.dx,z:p.y-c.dz},project));}}
+    onPointerMove={e=>{if(!drag.current)return;const p=point(e),c=drag.current;setPreview(snap({...c.cabinet,x:p.x-c.dx,z:p.y-c.dz},project,snapOptions));}}
     onPointerUp={e=>{if(!drag.current)return;if(preview)onMove(preview);drag.current=null;setPreview(null);e.currentTarget.releasePointerCapture(e.pointerId);}}
     onPointerCancel={()=>{drag.current=null;setPreview(null);}}
     onPointerDown={e=>{if(e.target===e.currentTarget)onSelect(null);}}>
@@ -38,18 +39,21 @@ export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zo
     <RoomDrawing room={project.room} selection={roomSelection} onSelect={onSelectRoom} arrows={roomMode}/>
     {items.map(original=>{
       const c=preview?.id===original.id?preview:original,t=typeOf(c.kind),active=c.id===selected;
+      const invalid=cabinetIssues(c,project).some(i=>i.severity==='error');
+      const labelY=c.kind==='oven'||c.kind==='sink'?t.depth/2-65:10;
       const m=FRONTS.find(m=>m.id===(c.front || (t.category==='wall'?project.finishes.upper:project.finishes.lower)))!;
-      return <g key={c.id} transform={`translate(${c.x},${c.z}) rotate(${-c.rotation})`} className={`plan-cabinet ${roomMode?'room-mode-module':''}`} role="button" tabIndex={0} aria-label={`${t.name}, ${c.width} мм`} aria-pressed={active}
+      return <g key={c.id} transform={`translate(${c.x},${c.z}) rotate(${-c.rotation})`} className={`plan-cabinet ${roomMode?'room-mode-module':''} ${invalid?'invalid-cabinet':''}`} data-cabinet-id={c.id} role="button" tabIndex={0} aria-label={`${t.name}, ${c.width} мм`} aria-pressed={active}
         onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect(c.id);}}}
         onPointerDown={e=>{if(roomMode)return;e.stopPropagation();onSelect(c.id);const p=point(e);drag.current={cabinet:c,dx:p.x-c.x,dz:p.y-c.z};svgRef.current!.setPointerCapture(e.pointerId);}}>
-        <rect x={-c.width/2} y={-t.depth/2} width={c.width} height={t.depth} rx="8" fill={m.color} fillOpacity={t.category==='wall'?.75:.84} stroke={active?'#a5543b':'#747d6a'} strokeWidth={active?18:7} strokeDasharray={t.category==='wall'?'18 8':undefined}/>
+        <rect x={-c.width/2} y={-t.depth/2} width={c.width} height={t.depth} rx="8" fill={m.color} fillOpacity={t.category==='wall'?.75:.84} stroke={invalid?'#bd4d3a':active?'#a5543b':'#747d6a'} strokeWidth={active?18:7} strokeDasharray={t.category==='wall'?'18 8':undefined}/>
         <path d={`M${-c.width/2+8} ${t.depth/2-22}H${c.width/2-8}`} stroke={active?'#a5543b':'#68745c'} strokeWidth="16"/>
         {c.kind==='sink'&&<rect x={-c.width*.30} y={-t.depth*.28} width={c.width*.6} height={t.depth*.55} rx="45" fill="#b9c0b2" stroke="#7d8a79" strokeWidth="8"/>}
         {c.kind==='oven'&&[-1,1].flatMap(x=>[-1,1].map(z=><circle key={`${x}${z}`} cx={x*125} cy={z*110} r="60" fill="#55604d" stroke="#85917a" strokeWidth="8"/>))}
-        <text y={c.kind==='oven'||c.kind==='sink'?t.depth/2-65:10} className="plan-size">{c.width}</text>
+        <text y={labelY} transform={c.rotation?`rotate(${c.rotation} 0 ${labelY})`:undefined} className="plan-size">{c.width}</text>
         {active&&<circle cx={c.width/2} cy={-t.depth/2} r="30" fill="#a5543b" stroke="#fffaf1" strokeWidth="10"/>}
       </g>;
     })}
+    {!roomMode&&selected&&(()=>{const c=preview??project.cabinets.find(c=>c.id===selected);return c?<CabinetGuides cabinet={c} project={project} minPassage={minPassage}/>:null;})()}
     <text x={70} y={d-100} className="plan-area">{(w*d/1e6).toLocaleString('ru-RU',{maximumFractionDigits:1})} м²</text>
   </svg>;
 }

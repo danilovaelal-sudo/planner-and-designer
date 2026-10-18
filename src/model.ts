@@ -1,5 +1,5 @@
 import { defaultRoom, emptyRoom, validateRoom, wallFrame, wallPoint } from './room';
-import type { Room, Wall } from './room';
+import type { Opening, Room, Wall } from './room';
 export type { Room, Wall } from './room';
 export type Category = 'base' | 'wall' | 'tall';
 export type Kind = 'base' | 'drawers' | 'sink' | 'oven' | 'dishwasher' | 'corner' | 'wall' | 'glass' | 'open' | 'fridge' | 'pantry';
@@ -73,47 +73,102 @@ export function intersects(a: Cabinet, b: Cabinet) {
   const ta=typeOf(a.kind), tb=typeOf(b.kind);
   if (ta.elevation >= tb.elevation+tb.height || tb.elevation >= ta.elevation+ta.height) return false;
   const aa=bounds(a), bb=bounds(b);
-  return aa.minX < bb.maxX-1 && aa.maxX > bb.minX+1 && aa.minZ < bb.maxZ-1 && aa.maxZ > bb.minZ+1;
+  return aa.minX < bb.maxX-.001 && aa.maxX > bb.minX+.001 && aa.minZ < bb.maxZ-.001 && aa.maxZ > bb.minZ+.001;
 }
-export function issues(project: Project) {
-  const out: { id: string; message: string }[]=[];
-  for (const c of project.cabinets) {
-    if (!isInside(c,project.room)) out.push({id:c.id,message:`«${typeOf(c.kind).name}» выходит за границы комнаты`});
-    if (typeOf(c.kind).height+typeOf(c.kind).elevation > project.room.height) out.push({id:c.id,message:`«${typeOf(c.kind).name}» выше потолка`});
+export interface PlacementIssue { id:string; message:string; severity:'error'|'warning'; code:'bounds'|'ceiling'|'overlap'|'opening'|'door-swing'|'window-access'|'passage'; otherId?:string; openingId?:string; }
+export const cabinetWall=(c:Cabinet):Wall=>({0:'A',270:'B',180:'C',90:'D'} as Record<number,Wall>)[c.rotation];
+export const wallRotation=(wall:Wall)=>({A:0,B:270,C:180,D:90})[wall];
+export function wallFootprint(c:Cabinet,room:Room,wall:Wall){
+  const f=wallFrame(room,wall),b=bounds(c);
+  const points=[[b.minX,b.minZ],[b.maxX,b.minZ],[b.maxX,b.maxZ],[b.minX,b.maxZ]].map(([x,z])=>({u:(x-f.x)*f.ux+(z-f.z)*f.uz,v:(x-f.x)*f.nx+(z-f.z)*f.nz}));
+  return {start:Math.min(...points.map(p=>p.u))+0,end:Math.max(...points.map(p=>p.u))+0,back:Math.min(...points.map(p=>p.v))+0,front:Math.max(...points.map(p=>p.v))+0};
+}
+export function placeAtWall(c:Cabinet,room:Room,wall:Wall,offset:number,backGap=0):Cabinet{
+  const p=wallPoint(room,wall,offset+c.width/2,backGap+typeOf(c.kind).depth/2);
+  return {...c,x:p.x,z:p.z,rotation:wallRotation(wall)};
+}
+export function placeBeside(c:Cabinet,other:Cabinet,room:Room,side:'before'|'after',gap=0):Cabinet{
+  const wall=cabinetWall(other),r=wallFootprint(other,room,wall);
+  return placeAtWall(c,room,wall,side==='after'?r.end+gap:r.start-gap-c.width,r.back);
+}
+export function worktopThickness(project:Project){return project.finishes.worktop==='darkstone'?12:project.finishes.worktop==='marble'?20:38;}
+function vertical(c:Cabinet,project:Project){const t=typeOf(c.kind);return {bottom:t.elevation,top:t.elevation+t.height+(t.category==='base'?worktopThickness(project):0)};}
+export function hitsDoorSwing(c:Cabinet,room:Room,o:Opening){
+  if(o.kind!=='door'||o.swing!=='in')return false;
+  const t=typeOf(c.kind);if(t.elevation>=o.height)return false;
+  const r=wallFootprint(c,room,o.wall),pivot=o.hinge==='left'?o.offset:o.offset+o.width;
+  const qmin=o.hinge==='left'?r.start-pivot:pivot-r.end,qmax=o.hinge==='left'?r.end-pivot:pivot-r.start;
+  // Exact rectangle/quarter-disk intersection, including both hinge directions.
+  return qmax>.001&&r.front>.001&&qmin<o.width&&r.back<o.width&&Math.max(0,qmin)**2+Math.max(0,r.back)**2<o.width**2-.001;
+}
+export function cabinetIssues(c:Cabinet,project:Project):PlacementIssue[]{
+  const out:PlacementIssue[]=[],t=typeOf(c.kind),v=vertical(c,project);
+  if(!isInside(c,project.room))out.push({id:c.id,severity:'error',code:'bounds',message:`«${t.name}» выходит за границы комнаты`});
+  if(v.top>project.room.height)out.push({id:c.id,severity:'error',code:'ceiling',message:`«${t.name}» выше потолка`});
+  for(const other of project.cabinets)if(other.id!==c.id&&intersects(c,other))out.push({id:c.id,otherId:other.id,severity:'error',code:'overlap',message:`Пересекаются: ${t.name.toLowerCase()} и ${typeOf(other.kind).name.toLowerCase()}`});
+  for(const o of project.room.openings){
+    const r=wallFootprint(c,project.room,o.wall),span=r.start<o.offset+o.width-.001&&r.end>o.offset+.001,levels=v.bottom<o.sill+o.height&&v.top>o.sill;
+    if(span&&levels&&r.back<=.001&&r.front>0)out.push({id:c.id,openingId:o.id,severity:'error',code:'opening',message:`«${t.name}» перекрывает ${o.kind==='door'?'дверной':'оконный'} проём на стене ${o.wall}`});
+    else if(hitsDoorSwing(c,project.room,o))out.push({id:c.id,openingId:o.id,severity:'error',code:'door-swing',message:`«${t.name}» мешает открыванию двери на стене ${o.wall}`});
+    else if(o.kind==='window'&&span&&levels&&r.back>0&&r.back<=600)out.push({id:c.id,openingId:o.id,severity:'warning',code:'window-access',message:`Проверьте доступ к окну на стене ${o.wall}: «${t.name}» стоит перед ним`});
   }
-  for (let i=0;i<project.cabinets.length;i++) for (let j=i+1;j<project.cabinets.length;j++) if(intersects(project.cabinets[i],project.cabinets[j])) out.push({id:project.cabinets[i].id,message:`Пересекаются: ${typeOf(project.cabinets[i].kind).name.toLowerCase()} и ${typeOf(project.cabinets[j].kind).name.toLowerCase()}`});
   return out;
 }
-export function snap(c: Cabinet, project: Project): Cabinet {
-  const b=bounds(c), halfX=(b.maxX-b.minX)/2, halfZ=(b.maxZ-b.minZ)/2;
-  let x=Math.round(c.x/50)*50, z=Math.round(c.z/50)*50;
-  const threshold=85;
-  if(Math.abs(c.x-halfX)<threshold) x=halfX;
-  if(Math.abs(c.x+halfX-project.room.width)<threshold) x=project.room.width-halfX;
-  if(Math.abs(c.z-halfZ)<threshold) z=halfZ;
-  if(Math.abs(c.z+halfZ-project.room.depth)<threshold) z=project.room.depth-halfZ;
-  for(const other of project.cabinets) {
-    if(other.id===c.id) continue;
-    const t=typeOf(c.kind),ot=typeOf(other.kind);
-    if((t.category==='wall') !== (ot.category==='wall')) continue;
-    const ob=bounds(other);
-    if (Math.abs(c.z-other.z)<threshold) {
-      if(Math.abs((c.x-halfX)-ob.maxX)<threshold) {x=ob.maxX+halfX;z=other.z;}
-      else if(Math.abs((c.x+halfX)-ob.minX)<threshold) {x=ob.minX-halfX;z=other.z;}
-    }
-    if(Math.abs(c.x-other.x)<threshold) {
-      if(Math.abs((c.z-halfZ)-ob.maxZ)<threshold) {z=ob.maxZ+halfZ;x=other.x;}
-      else if(Math.abs((c.z+halfZ)-ob.minZ)<threshold) {z=ob.minZ-halfZ;x=other.x;}
+export function frontClearance(c:Cabinet,project:Project){
+  const wall=cabinetWall(c),r=wallFootprint(c,project.room,wall),f=wallFrame(project.room,wall),roomDepth=wall==='A'||wall==='C'?project.room.depth:project.room.width;
+  let distance=roomDepth-r.front,blocker:Cabinet|undefined;
+  for(const other of project.cabinets){if(other.id===c.id||typeOf(other.kind).category==='wall')continue;const o=wallFootprint(other,project.room,wall);
+    if(o.start<r.end-.001&&o.end>r.start+.001&&o.back>=r.front-.001&&o.back-r.front<distance){distance=o.back-r.front;blocker=other;}}
+  return {distance:Math.max(0,Math.round(distance)),blocker,from:wallPoint(project.room,wall,(r.start+r.end)/2,r.front),to:wallPoint(project.room,wall,(r.start+r.end)/2,r.front+Math.max(0,distance)),wall:f};
+}
+export function issues(project:Project,minPassage=900):PlacementIssue[]{
+  const out:PlacementIssue[]=[],pairs=new Set<string>();
+  for(const c of project.cabinets){for(const issue of cabinetIssues(c,project)){if(issue.code==='overlap'){const key=[issue.id,issue.otherId].sort().join(':');if(pairs.has(key))continue;pairs.add(key);}out.push(issue);}
+    if(typeOf(c.kind).category==='wall')continue;
+    const clear=frontClearance(c,project);
+    if(clear.blocker&&Math.abs(c.rotation-clear.blocker.rotation)===180&&clear.distance<minPassage){const key='passage:'+ [c.id,clear.blocker.id].sort().join(':');if(!pairs.has(key)){pairs.add(key);out.push({id:c.id,otherId:clear.blocker.id,severity:'warning',code:'passage',message:`Между встречными рядами ${clear.distance} мм — меньше выбранного ориентира ${minPassage} мм`});}}
+  }
+  return out;
+}
+export interface SnapOptions { enabled?:boolean; grid?:number; gap?:number; }
+export function snap(c:Cabinet,project:Project,options:SnapOptions={}):Cabinet{
+  const {enabled=true,grid=50,gap=0}=options;
+  if(!enabled)return nudgeCabinet({...c,x:Math.round(c.x),z:Math.round(c.z)},0,0,project.room);
+  const b=bounds(c),hx=(b.maxX-b.minX)/2,hz=(b.maxZ-b.minZ)/2,threshold=85;
+  let x=Math.round(c.x/grid)*grid,z=Math.round(c.z/grid)*grid;
+  if(Math.abs(b.minX)<threshold)x=hx;
+  if(Math.abs(b.maxX-project.room.width)<threshold)x=project.room.width-hx;
+  if(Math.abs(b.minZ)<threshold)z=hz;
+  if(Math.abs(b.maxZ-project.room.depth)<threshold)z=project.room.depth-hz;
+  let nearest:Cabinet|undefined,best=threshold;
+  for(const other of project.cabinets){
+    if(other.id===c.id||other.rotation!==c.rotation)continue;
+    const t=typeOf(c.kind),o=typeOf(other.kind);
+    if(t.elevation>=o.elevation+o.height||o.elevation>=t.elevation+t.height)continue;
+    for(const side of ['before','after'] as const){
+      const candidate=placeBeside(c,other,project.room,side,gap),distance=Math.hypot(candidate.x-c.x,candidate.z-c.z);
+      if(distance<best&&!cabinetIssues(candidate,project).some(i=>i.severity==='error')){nearest=candidate;best=distance;}
     }
   }
-  return {...c,x:Math.max(halfX,Math.min(project.room.width-halfX,x)),z:Math.max(halfZ,Math.min(project.room.depth-halfZ,z))};
+  return nearest??nudgeCabinet({...c,x,z},0,0,project.room);
 }
-export function findPlacement(kind: Kind, width: number, project: Project, wall: Wall): Cabinet | null {
-  const t=typeOf(kind), rotation={A:0,B:270,C:180,D:90}[wall],length=wallFrame(project.room,wall).length;
-  for(let pos=width/2;pos+width/2<=length;pos+=50) {
-    const p=wallPoint(project.room,wall,pos,t.depth/2);
-    const candidate=cabinet(kind,width,p.x,p.z,rotation);
-    if(isInside(candidate,project.room) && !project.cabinets.some(c=>intersects(c,candidate))) return candidate;
+export function findPlacement(kind:Kind,width:number,project:Project,wall:Wall,gap=0):Cabinet|null{
+  const template=cabinet(kind,width,0,0),length=wallFrame(project.room,wall).length;
+  const f=wallFrame(project.room,wall);
+  const doorEnds=project.room.openings.filter(o=>o.kind==='door'&&o.swing==='in').map(o=>{
+    const corners=[wallPoint(project.room,o.wall,o.offset,0),wallPoint(project.room,o.wall,o.offset+o.width,0),wallPoint(project.room,o.wall,o.offset,o.width),wallPoint(project.room,o.wall,o.offset+o.width,o.width)];
+    return Math.ceil(Math.max(...corners.map(p=>(p.x-f.x)*f.ux+(p.z-f.z)*f.uz)));
+  });
+  const offsets=[0,...project.cabinets.map(c=>wallFootprint(c,project.room,wall).end+gap),...project.room.openings.filter(o=>o.wall===wall).map(o=>o.offset+o.width),...doorEnds];
+  for(const offset of [...new Set(offsets)].sort((a,b)=>a-b)){
+    if(offset<0||offset+width>length)continue;
+    const c=placeAtWall(template,project.room,wall,offset);
+    if(!cabinetIssues(c,project).some(i=>i.severity==='error')&&project.cabinets.every(other=>{
+      if(!gap||(typeOf(c.kind).category==='wall')!==(typeOf(other.kind).category==='wall'))return true;
+      const r=wallFootprint(other,project.room,wall),t=wallFootprint(c,project.room,wall);
+      if(r.back>=t.front||r.front<=t.back)return true;
+      return t.start>=r.end+gap||t.end<=r.start-gap;
+    }))return c;
   }
   return null;
 }
@@ -123,15 +178,15 @@ export function nudgeCabinet(c: Cabinet, dx: number, dz: number, room: Room): Ca
   const b=bounds(c),hx=(b.maxX-b.minX)/2,hz=(b.maxZ-b.minZ)/2;
   return {...c,x:Math.max(hx,Math.min(room.width-hx,c.x+dx)),z:Math.max(hz,Math.min(room.depth-hz,c.z+dz))};
 }
-export function resizeCabinet(c: Cabinet, width: number, room: Room): Cabinet {
-  const delta=(width-c.width)/2;
-  return nudgeCabinet({...c,width,x:c.x+(c.rotation%180===0?delta:0),z:c.z+(c.rotation%180!==0?delta:0)},0,0,room);
+export function resizeCabinet(c:Cabinet,width:number,room:Room):Cabinet{
+  const wall=cabinetWall(c),r=wallFootprint(c,room,wall);
+  return placeAtWall({...c,width},room,wall,r.start,r.back);
 }
 /** Start a layout in the user's room; never replace their measurements with a demo room. */
 export function createKitchen(room: Room, layout: KitchenLayout): Project {
   const project: Project = {version:2,name:'Моя кухня',room:structuredClone(room),cabinets:[],finishes:{lower:'sage',upper:'oak',worktop:'limestone',handle:'brass',floor:'oak',wall:'cream'}};
   if(layout==='empty')return project;
-  if(layout==='corner')project.cabinets.push(cabinet('corner',900,room.width-450,450));
+  if(layout==='corner'){const corner=cabinet('corner',900,room.width-450,450);if(!cabinetIssues(corner,project).some(i=>i.severity==='error'))project.cabinets.push(corner);}
   for(const kind of ['fridge','sink','oven','drawers'] as const){
     const next=findPlacement(kind,600,project,'A') || (layout==='corner'?findPlacement(kind,600,project,'B'):null);
     if(next)project.cabinets.push(next);
@@ -141,7 +196,7 @@ export function createKitchen(room: Room, layout: KitchenLayout): Project {
     if(!['sink','drawers'].includes(c.kind))continue;
     const wall=c.rotation===0?'A':'B';
     const upper=cabinet('wall',c.width,wall==='A'?c.x:room.width-175,wall==='A'?175:c.z,c.rotation);
-    if(!project.cabinets.some(other=>intersects(other,upper)))project.cabinets.push(upper);
+    if(!cabinetIssues(upper,project).some(i=>i.severity==='error'))project.cabinets.push(upper);
   }
   return project;
 }

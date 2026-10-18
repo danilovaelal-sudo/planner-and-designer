@@ -4,5 +4,6 @@ import App from './App';
 import './styles.css';
 import './journey.css';
 import './room.css';
+import './assembly.css';
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);

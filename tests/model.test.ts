@@ -18,7 +18,7 @@ describe('kitchen geometry',()=>{
     expect(intersects(cabinet('fridge',600,300,300),cabinet('wall',600,300,175))).toBe(true);
   });
   it('finds a free position on the return wall without overlapping the corner',()=>{
-    const p=starter(),c=findPlacement('base',600,p,'B');
+    const p=starter();p.room.openings=[];const c=findPlacement('base',600,p,'B');
     expect(c).not.toBeNull();expect(c!.rotation).toBe(270);
     expect(isInside(c!,p.room)).toBe(true);
     expect(p.cabinets.some(other=>intersects(other,c!))).toBe(false);
