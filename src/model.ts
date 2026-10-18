@@ -1,7 +1,9 @@
+import { defaultRoom, emptyRoom, validateRoom, wallFrame, wallPoint } from './room';
+import type { Room, Wall } from './room';
+export type { Room, Wall } from './room';
 export type Category = 'base' | 'wall' | 'tall';
 export type Kind = 'base' | 'drawers' | 'sink' | 'oven' | 'dishwasher' | 'corner' | 'wall' | 'glass' | 'open' | 'fridge' | 'pantry';
 export type View = '3d' | 'plan' | 'elevation';
-export type Wall = 'A' | 'B';
 export interface ModuleType {
   kind: Kind; name: string; description: string; category: Category;
   widths: number[]; depth: number; height: number; elevation: number;
@@ -21,9 +23,8 @@ export const MODULES: ModuleType[] = [
 ];
 export const typeOf = (kind: Kind) => MODULES.find(m => m.kind === kind)!;
 export interface Cabinet { id: string; kind: Kind; width: number; x: number; z: number; rotation: number; front?: string; hinge: 'left' | 'right'; }
-export interface Room { width: number; depth: number; height: number; window: boolean; windowWidth: number; windowOffset: number; door: boolean; }
 export interface Finishes { lower: string; upper: string; worktop: string; handle: 'black' | 'brass' | 'none'; floor: 'oak' | 'stone'; wall: 'cream' | 'white' | 'sand'; }
-export interface Project { version: 1; name: string; room: Room; cabinets: Cabinet[]; finishes: Finishes; }
+export interface Project { version: 2; name: string; room: Room; cabinets: Cabinet[]; finishes: Finishes; }
 export interface Material { id: string; name: string; color: string; family: string; surface: string; wood?: boolean; stone?: boolean; note: string; }
 export const FRONTS: Material[] = [
   { id: 'linen', name: 'Тёплый белый', color: '#e9e5d8', family: 'МДФ · эмаль', surface: 'Матовая', note: 'Универсальная палитра. Конкретный оттенок выбирается по образцу.' },
@@ -56,7 +57,7 @@ export function starter(layout: 'corner' | 'straight' = 'corner'): Project {
   if (layout === 'corner') cabinets.push(cabinet('corner',900,3150,450), cabinet('drawers',600,3300,1200,270), cabinet('dishwasher',600,3300,1800,270));
   else cabinets.push(cabinet('base',600,2900,300));
   cabinets.push(cabinet('wall',600,900,175), cabinet('open',600,1500,160), cabinet('glass',800,2200,175));
-  return { version: 1, name: 'Моя кухня', room: { width: 3600, depth: 3000, height: 2700, window: true, windowWidth: 1400, windowOffset: 1050, door: true }, cabinets, finishes: { lower: 'sage', upper: 'oak', worktop: 'limestone', handle: 'brass', floor: 'oak', wall: 'cream' } };
+  return { version: 2, name: 'Моя кухня', room: defaultRoom(), cabinets, finishes: { lower: 'sage', upper: 'oak', worktop: 'limestone', handle: 'brass', floor: 'oak', wall: 'cream' } };
 }
 export function bounds(c: Cabinet) {
   const d = typeOf(c.kind).depth;
@@ -108,9 +109,10 @@ export function snap(c: Cabinet, project: Project): Cabinet {
   return {...c,x:Math.max(halfX,Math.min(project.room.width-halfX,x)),z:Math.max(halfZ,Math.min(project.room.depth-halfZ,z))};
 }
 export function findPlacement(kind: Kind, width: number, project: Project, wall: Wall): Cabinet | null {
-  const t=typeOf(kind), rotation=wall==='A'?0:270;
-  for(let pos=width/2;pos+width/2<=(wall==='A'?project.room.width:project.room.depth);pos+=50) {
-    const candidate=cabinet(kind,width,wall==='A'?pos:project.room.width-t.depth/2,wall==='A'?t.depth/2:pos,rotation);
+  const t=typeOf(kind), rotation={A:0,B:270,C:180,D:90}[wall],length=wallFrame(project.room,wall).length;
+  for(let pos=width/2;pos+width/2<=length;pos+=50) {
+    const p=wallPoint(project.room,wall,pos,t.depth/2);
+    const candidate=cabinet(kind,width,p.x,p.z,rotation);
     if(isInside(candidate,project.room) && !project.cabinets.some(c=>intersects(c,candidate))) return candidate;
   }
   return null;
@@ -127,7 +129,7 @@ export function resizeCabinet(c: Cabinet, width: number, room: Room): Cabinet {
 }
 /** Start a layout in the user's room; never replace their measurements with a demo room. */
 export function createKitchen(room: Room, layout: KitchenLayout): Project {
-  const project: Project = {version:1,name:'Моя кухня',room:{...room},cabinets:[],finishes:{lower:'sage',upper:'oak',worktop:'limestone',handle:'brass',floor:'oak',wall:'cream'}};
+  const project: Project = {version:2,name:'Моя кухня',room:structuredClone(room),cabinets:[],finishes:{lower:'sage',upper:'oak',worktop:'limestone',handle:'brass',floor:'oak',wall:'cream'}};
   if(layout==='empty')return project;
   if(layout==='corner')project.cabinets.push(cabinet('corner',900,room.width-450,450));
   for(const kind of ['fridge','sink','oven','drawers'] as const){
@@ -145,22 +147,36 @@ export function createKitchen(room: Room, layout: KitchenLayout): Project {
 }
 export const STORAGE_KEY='kitchen-planner:project:v1';
 export const VARIANTS_KEY='kitchen-planner:variants:v1';
+/** Accept v1 exports and stored variants, then persist only the v2 schema. */
 export function parseProject(value: unknown): Project {
   if(!value || typeof value!=='object') throw new Error('Неверный формат проекта');
-  const p=value as Project;
+  const raw=value as Record<string, unknown>;
+  if(raw.version!==1 && raw.version!==2) throw new Error('Неизвестная версия проекта');
+  let migrated: unknown = value;
+  if(raw.version===1){
+    const r=raw.room as Record<string, unknown> | undefined;
+    const num=(n:unknown,min:number,max:number): n is number => typeof n==='number'&&Number.isFinite(n)&&n>=min&&n<=max;
+    if(!r || !num(r.width,1800,8000)||!num(r.depth,1800,8000)||!num(r.height,2200,4500)||typeof r.window!=='boolean'||typeof r.door!=='boolean'||!num(r.windowWidth,300,4000)||!num(r.windowOffset,0,8000)) throw new Error('Некорректные размеры старого проекта');
+    if(r.window && r.windowOffset+r.windowWidth>r.depth)throw new Error('Окно выходит за пределы стены');
+    const room=emptyRoom(Math.round(r.width),Math.round(r.depth),Math.round(r.height));
+    if(r.window)room.openings.push({id:'migrated-window',kind:'window',wall:'B',offset:Math.round(r.windowOffset),width:Math.round(r.windowWidth),height:Math.min(1200,room.height-1150),sill:1150,hinge:'left',swing:'in'});
+    if(r.door)room.openings.push({id:'migrated-door',kind:'door',wall:'C',offset:150,width:900,height:2100,sill:0,hinge:'right',swing:'in'});
+    migrated={...raw,version:2,room};
+  }
+  const p=migrated as Project;
   const num=(n:unknown,min:number,max:number)=>typeof n==='number'&&Number.isFinite(n)&&n>=min&&n<=max;
-  if(p.version!==1 || typeof p.name!=='string' || p.name.length>100 || !p.room || !p.finishes || !Array.isArray(p.cabinets)||p.cabinets.length>150) throw new Error('Неверный формат или версия проекта');
+  if(typeof p.name!=='string' || p.name.length>100 || !p.room || !p.finishes || !Array.isArray(p.cabinets)||p.cabinets.length>150) throw new Error('Неверный формат проекта');
+  if(!p.room.walls || !Array.isArray(p.room.openings) || p.room.openings.some(o=>!o||typeof o!=='object'))throw new Error('Неверный формат помещения');
+  const errors=validateRoom(p.room);if(errors.length)throw new Error(errors[0]);
   const r=p.room;
-  if(!num(r.width,1800,8000)||!num(r.depth,1800,8000)||!num(r.height,2200,4500)||typeof r.window!=='boolean'||typeof r.door!=='boolean'||!num(r.windowWidth,300,4000)||!num(r.windowOffset,0,8000)) throw new Error('Некорректные размеры помещения');
-  if(r.window && r.windowOffset+r.windowWidth>r.depth) throw new Error('Окно выходит за пределы стены');
   const ids=new Set<string>();
   for(const c of p.cabinets) {
+    if(!c || typeof c!=='object')throw new Error('Некорректный модуль в проекте');
     const t=MODULES.find(t=>t.kind===c.kind);
     if(!t||typeof c.id!=='string'||c.id.length>100||ids.has(c.id)||!t.widths.includes(c.width)||!num(c.x,-8000,16000)||!num(c.z,-8000,16000)||![0,90,180,270].includes(c.rotation)||!['left','right'].includes(c.hinge)||(c.front!==undefined&&!FRONTS.some(m=>m.id===c.front))) throw new Error('Некорректный модуль в проекте');
     ids.add(c.id);
   }
   const f=p.finishes;
   if(!FRONTS.some(m=>m.id===f.lower)||!FRONTS.some(m=>m.id===f.upper)||!WORKTOPS.some(m=>m.id===f.worktop)||!['black','brass','none'].includes(f.handle)||!['oak','stone'].includes(f.floor)||!['cream','white','sand'].includes(f.wall)) throw new Error('Неизвестный материал');
-  // Pick only supported fields: imported files cannot inject arbitrary app state.
-  return {version:1,name:p.name,room:{width:r.width,depth:r.depth,height:r.height,window:r.window,windowWidth:r.windowWidth,windowOffset:r.windowOffset,door:r.door},finishes:{lower:f.lower,upper:f.upper,worktop:f.worktop,handle:f.handle,floor:f.floor,wall:f.wall},cabinets:p.cabinets.map(c=>({id:c.id,kind:c.kind,width:c.width,x:c.x,z:c.z,rotation:c.rotation,hinge:c.hinge,...(c.front?{front:c.front}:{})}))};
+  return {version:2,name:p.name,room:{width:r.width,depth:r.depth,height:r.height,walls:{A:{thickness:r.walls.A.thickness},B:{thickness:r.walls.B.thickness},C:{thickness:r.walls.C.thickness},D:{thickness:r.walls.D.thickness}},openings:r.openings.map(o=>({id:o.id,kind:o.kind,wall:o.wall,offset:o.offset,width:o.width,height:o.height,sill:o.sill,hinge:o.hinge,swing:o.swing}))},finishes:{lower:f.lower,upper:f.upper,worktop:f.worktop,handle:f.handle,floor:f.floor,wall:f.wall},cabinets:p.cabinets.map(c=>({id:c.id,kind:c.kind,width:c.width,x:c.x,z:c.z,rotation:c.rotation,hinge:c.hinge,...(c.front?{front:c.front}:{})}))};
 }

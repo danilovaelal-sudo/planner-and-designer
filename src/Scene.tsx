@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FRONTS, WORKTOPS, bounds, typeOf } from './model';
-import type { Cabinet, Material, Project } from './model';
+import type { Material, Project } from './model';
+import { WALLS, wallFrame, wallPanels } from './room';
+import type { RoomSelection } from './room';
 
 function surface(m: Material, textures: THREE.Texture[]) {
   let map: THREE.CanvasTexture | undefined;
@@ -20,7 +22,7 @@ function surface(m: Material, textures: THREE.Texture[]) {
   return new THREE.MeshStandardMaterial({color:map?'#ffffff':m.color,map,roughness:m.wood?.68:.77});
 }
 
-function populate(scene:THREE.Scene,project:Project,selected:string|null,textures:THREE.Texture[]) {
+function populate(scene:THREE.Scene,project:Project,selected:string|null,textures:THREE.Texture[],roomSelection:RoomSelection) {
   const root=new THREE.Group();scene.add(root);
   const w=project.room.width/1000,d=project.room.depth/1000,h=project.room.height/1000;
   const offset=new THREE.Vector3(-w/2,0,-d/2);
@@ -45,24 +47,44 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
     for(let x=-w/2;x<w/2;x+=.6) mesh(root,.004,.003,d,x,-.008,0,new THREE.MeshStandardMaterial({color:'#b3b0a8'}));
     for(let z=-d/2;z<d/2;z+=.6) mesh(root,w,.003,.004,0,-.008,z,new THREE.MeshStandardMaterial({color:'#b3b0a8'}));
   }
-  mesh(root,w+.10,h,.08,0,h/2,-d/2-.05,wallMat);
-  if(project.room.window) {
-    const start=project.room.windowOffset/1000,end=start+project.room.windowWidth/1000;
-    mesh(root,.08,1.15,d,w/2+.05,.575,0,wallMat);
-    mesh(root,.08,Math.max(.1,h-2.35),d,w/2+.05,(h+2.35)/2,0,wallMat);
-    if(start>0) mesh(root,.08,1.2,start,w/2+.05,1.75,-d/2+start/2,wallMat);
-    if(end<d) mesh(root,.08,1.2,d-end,w/2+.05,1.75,-d/2+(end+d)/2,wallMat);
-    const glass=new THREE.MeshBasicMaterial({color:'#d9e6e3'});
-    mesh(root,.022,1.2,end-start,w/2+.05,1.75,-d/2+(start+end)/2,glass);
-    for(const z of [start,(start+end)/2,end]) mesh(root,.10,1.26,.035,w/2+.025,1.75,-d/2+z,white);
-    for(const y of [1.14,2.36]) mesh(root,.1,.04,end-start,w/2+.025,y,-d/2+(start+end)/2,white);
-    mesh(root,.20,.04,end-start+.1,w/2-.03,1.13,-d/2+(start+end)/2,white);
-  } else mesh(root,.08,h,d,w/2+.05,h/2,0,wallMat);
-  // A tiled splashback gives the kitchen scale without relying on external images.
-  mesh(root,w,.53,.012,0,1.18,-d/2+.005,new THREE.MeshStandardMaterial({color:'#ddd9cc',roughness:.85}));
-  const grout=new THREE.MeshStandardMaterial({color:'#c9c5b9',roughness:1});
-  for(let x=-w/2;x<w/2;x+=.3) mesh(root,.002,.53,.014,x,1.18,-d/2+.012,grout);
-  for(const y of [1.05,1.2,1.35]) mesh(root,w,.002,.014,0,y,-d/2+.012,grout);
+  // Every wall is built from the same opening rectangles used by plan and elevations.
+  for(const wall of WALLS){
+    const f=wallFrame(project.room,wall),group=new THREE.Group();
+    group.position.set(f.x/1000-w/2,0,f.z/1000-d/2);group.rotation.y=-f.angle*Math.PI/180;
+    group.userData.cutawayWall=wall;group.userData.normal={x:f.nx,z:f.nz};group.userData.wall=wall;root.add(group);
+    const mat=roomSelection?.kind==='wall'&&roomSelection.wall===wall?new THREE.MeshStandardMaterial({color:'#d9e0cd',roughness:.95}):wallMat;
+    for(const panel of wallPanels(project.room,wall))mesh(group,panel.width/1000,panel.height/1000,f.thickness/1000,(panel.start+panel.width/2)/1000,(panel.bottom+panel.height/2)/1000,-f.thickness/2000,mat);
+    if(wall==='A'||wall==='C'){
+      const before=project.room.walls[wall==='A'?'D':'B'].thickness/1000,after=project.room.walls[wall==='A'?'B':'D'].thickness/1000;
+      mesh(group,before,h,f.thickness/1000,-before/2,h/2,-f.thickness/2000,mat);
+      mesh(group,after,h,f.thickness/1000,f.length/1000+after/2,h/2,-f.thickness/2000,mat);
+    }
+    // Low outlines keep the full room footprint visible in the cutaway view.
+    const point=new THREE.Group();point.position.copy(group.position);point.rotation.copy(group.rotation);root.add(point);
+    mesh(point,f.length/1000,.025,f.thickness/1000,f.length/2000,.0125,-f.thickness/2000,wallMat);
+    for(const o of project.room.openings.filter(o=>o.wall===wall)){
+      const opening=new THREE.Group();opening.userData.openingId=o.id;group.add(opening);
+      const x=o.offset/1000,ow=o.width/1000,oh=o.height/1000,sy=o.sill/1000,th=f.thickness/1000;
+      if(o.kind==='window'){
+        const glass=new THREE.MeshStandardMaterial({color:'#c4dedc',transparent:true,opacity:.45,roughness:.12,metalness:.1});
+        mesh(opening,ow,oh,.012,x+ow/2,sy+oh/2,-th/2,glass);
+        for(const px of [x+.018,x+ow/2,x+ow-.018])mesh(opening,.035,oh,.06,px,sy+oh/2,-th/2,white);
+        for(const y of [sy+.018,sy+oh-.018])mesh(opening,ow,.035,.06,x+ow/2,y,-th/2,white);
+        mesh(opening,ow+.06,.035,th+.08,x+ow/2,sy-.018,-th/2+.025,white);
+      }else{
+        for(const px of [x+.02,x+ow-.02])mesh(opening,.04,oh,.065,px,oh/2,-th/2,white);
+        mesh(opening,ow,.04,.065,x+ow/2,oh-.02,-th/2,white);
+        const leaf=new THREE.Group();leaf.position.set(o.hinge==='left'?x:x+ow,0,o.swing==='in'?0:-th);
+        const direction=o.hinge==='left'?1:-1,inside=o.swing==='in'?1:-1;
+        leaf.rotation.y=-direction*inside*Math.PI/2;opening.add(leaf);
+        mesh(leaf,ow-.06,oh-.04,.035,direction*(ow-.06)/2,(oh-.04)/2,0,new THREE.MeshStandardMaterial({color:'#c5b294',roughness:.8}));
+        mesh(leaf,.08,.018,.04,direction*(ow-.12),1,0,handle);
+      }
+      if(roomSelection?.kind==='opening'&&roomSelection.id===o.id){
+        const g=new THREE.BoxGeometry(ow,oh,.04),outline=new THREE.LineSegments(new THREE.EdgesGeometry(g),new THREE.LineBasicMaterial({color:'#a5543b'}));g.dispose();outline.position.set(x+ow/2,sy+oh/2,.01);opening.add(outline);
+      }
+    }
+  }
   for(const c of project.cabinets) {
     const t=typeOf(c.kind),cw=c.width/1000,cd=t.depth/1000,ch=t.height/1000;
     const group=new THREE.Group();group.position.copy(offset).add(new THREE.Vector3(c.x/1000,t.elevation/1000,c.z/1000));group.rotation.y=c.rotation*Math.PI/180;group.userData.cabinetId=c.id;root.add(group);
@@ -125,7 +147,7 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
   return root;
 }
 
-export default function Scene({project,selected,onSelect,resetKey,onReady,cameraMode='kitchen',zoom=1}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;resetKey:number;onReady:(canvas:HTMLCanvasElement|null)=>void;cameraMode?:'kitchen'|'room'|'selected';zoom?:number}) {
+export default function Scene({project,selected,onSelect,resetKey,onReady,cameraMode='kitchen',zoom=1,roomSelection=null,onSelectRoom}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;resetKey:number;onReady:(canvas:HTMLCanvasElement|null)=>void;cameraMode?:'kitchen'|'room'|'selected';zoom?:number;roomSelection?:RoomSelection;onSelectRoom?:(s:RoomSelection)=>void}) {
   const host=useRef<HTMLDivElement>(null);
   const rendererRef=useRef<THREE.WebGLRenderer|null>(null);
   const cameraRef=useRef<THREE.PerspectiveCamera|null>(null);
@@ -133,6 +155,7 @@ export default function Scene({project,selected,onSelect,resetKey,onReady,camera
   const controlsRef=useRef<OrbitControls|null>(null);
   const dirtyRef=useRef(true);
   const clickRef=useRef(onSelect);clickRef.current=onSelect;
+  const roomClickRef=useRef(onSelectRoom);roomClickRef.current=onSelectRoom;
   const readyRef=useRef(onReady);readyRef.current=onReady;
   const stateRef=useRef({project,selected,cameraMode,zoom});stateRef.current={project,selected,cameraMode,zoom};
   const fitRef=useRef<()=>void>(()=>{});
@@ -175,17 +198,23 @@ export default function Scene({project,selected,onSelect,resetKey,onReady,camera
       if(Math.hypot(e.clientX-down.x,e.clientY-down.y)>5) return;
       const rect=renderer.domElement.getBoundingClientRect();raycaster.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1),camera);
       const hits=raycaster.intersectObjects(scene.children,true);
-      for(const hit of hits){let obj:THREE.Object3D|null=hit.object;while(obj){if(obj.userData.cabinetId){clickRef.current(obj.userData.cabinetId);return;}obj=obj.parent;}}
+      for(const hit of hits){
+        let ancestor:THREE.Object3D|null=hit.object,visible=true;while(ancestor){if(!ancestor.visible)visible=false;ancestor=ancestor.parent;}if(!visible)continue;
+        let obj:THREE.Object3D|null=hit.object;while(obj){if(obj.userData.cabinetId){clickRef.current(obj.userData.cabinetId);return;}if(obj.userData.openingId){roomClickRef.current?.({kind:'opening',id:obj.userData.openingId});return;}if(obj.userData.wall){roomClickRef.current?.({kind:'wall',wall:obj.userData.wall});return;}obj=obj.parent;}
+      }
       clickRef.current(null);
     };
     renderer.domElement.addEventListener('pointerdown',pointerdown);renderer.domElement.addEventListener('pointerup',pointerup);
-    renderer.setAnimationLoop(()=>{if(controls.update()||dirtyRef.current){renderer.render(scene,camera);dirtyRef.current=false;}});
+    renderer.setAnimationLoop(()=>{if(controls.update()||dirtyRef.current){
+      for(const root of scene.children)for(const group of root.children){if(group.userData.cutawayWall){const n=group.userData.normal;group.visible=(camera.position.x-group.position.x)*n.x+(camera.position.z-group.position.z)*n.z>=0;}}
+      renderer.render(scene,camera);dirtyRef.current=false;
+    }});
     return()=>{resize.disconnect();renderer.setAnimationLoop(null);controls.dispose();renderer.domElement.removeEventListener('pointerdown',pointerdown);renderer.domElement.removeEventListener('pointerup',pointerup);renderer.dispose();renderer.domElement.remove();readyRef.current(null);rendererRef.current=null;sceneRef.current=null;};
   },[]);
   useEffect(()=>{
-    if(!sceneRef.current) return;const textures:THREE.Texture[]=[];const scene=sceneRef.current;const root=populate(scene,project,selected,textures);dirtyRef.current=true;
+    if(!sceneRef.current) return;const textures:THREE.Texture[]=[];const scene=sceneRef.current;const root=populate(scene,project,selected,textures,roomSelection);dirtyRef.current=true;
     return()=>{scene.remove(root);const materials=new Set<THREE.Material>();root.traverse(obj=>{if(obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments){obj.geometry.dispose();if(Array.isArray(obj.material))obj.material.forEach(m=>materials.add(m));else materials.add(obj.material);}});materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());};
-  },[project,selected]);
+  },[project,selected,roomSelection]);
   useEffect(()=>{fitRef.current();},[resetKey,project.room.width,project.room.depth,project.cabinets.length,cameraMode,zoom,cameraMode==='selected'?selected:null]);
   return <div ref={host} className="scene-host" aria-label="Интерактивная 3D-модель кухни">{failed&&<div className="scene-error"><strong>3D недоступен в этом браузере</strong><p>Используйте вид «План 2D» или включите аппаратное ускорение.</p></div>}</div>;
 }

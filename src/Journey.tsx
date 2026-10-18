@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, ChevronDown, Ruler, X } from 'lucide-react';
+import { emptyRoom } from './room';
 import type { KitchenLayout, Room } from './model';
 
 export const STEPS = [
-  {id:'room',label:'Комната',title:'Задайте размеры комнаты',hint:'Измерьте стены, затем переходите к сборке.'},
+  {id:'room',label:'Комната',title:'Задайте размеры комнаты',hint:'Задайте стены, двери и окна. Нажмите на элемент на плане.'},
   {id:'modules',label:'Сборка',title:'Соберите свою кухню',hint:'Добавляйте шкафы. Нажмите на любой, чтобы изменить.'},
   {id:'materials',label:'Отделка',title:'Подберите цвета и материалы',hint:'Выберите поверхность и попробуйте разные сочетания.'},
   {id:'variants',label:'Результат',title:'Сохраните понравившийся вариант',hint:'Посмотрите кухню в 3D и сохраните проект или снимок.'},
@@ -38,7 +39,7 @@ export default function ProjectSetup({room,hasProject,onContinue,onExample,onCre
   }
   function create(){
     const d=Math.round(parse(depth)*10);
-    onCreate({...room,width:Math.round(parse(width)*10),depth:d,height:Math.round(parse(height)*10),windowWidth:Math.min(room.windowWidth,d),windowOffset:Math.min(room.windowOffset,Math.max(0,d-room.windowWidth))},filled?layout:'empty');
+    onCreate(emptyRoom(Math.round(parse(width)*10),d,Math.round(parse(height)*10)),filled?layout:'empty');
   }
   return <div className="setup-backdrop"><section className={`project-setup setup-${page}`} role="dialog" aria-modal="true" aria-labelledby="setup-title">
     <header className="setup-top"><span className="setup-brand"><span>к</span>кухня.</span><button className="setup-close" aria-label="Закрыть начало проекта" onClick={onClose}><X size={22}/></button></header>
@@ -49,7 +50,7 @@ export default function ProjectSetup({room,hasProject,onContinue,onExample,onCre
       <div className="setup-form-heading"><button className="setup-back" onClick={()=>setPage(page==='room'?'welcome':'room')}><ArrowLeft size={18}/>Назад</button><span>НАЧАЛО ПРОЕКТА · {page==='room'?'1':'2'} / 2</span></div>
       <div className="setup-form-body">{page==='room'?<>
         <h1 id="setup-title">Какая у вас комната?</h1><p>Введите размеры в сантиметрах. Окна и дверь можно настроить на следующем экране.</p>
-        <div className="setup-room-preview"><svg viewBox="0 0 300 150" fill="none" aria-hidden="true"><path d="M65 122V35H249V122H225M65 122H184" stroke="#8e9d7c" strokeWidth="7"/><path d="M75 18H239M45 45V110" stroke="#adb49f"/><text x="155" y="12" textAnchor="middle">Стена A</text><text x="28" y="80" transform="rotate(-90 28 80)" textAnchor="middle">Стена B</text><text x="156" y="88" textAnchor="middle" className="setup-area">{Number.isFinite(parse(width)*parse(depth))?((parse(width)*parse(depth))/10000).toFixed(1):'—'} м²</text></svg></div>
+        <div className="setup-room-preview"><svg viewBox="0 0 300 150" fill="none" aria-hidden="true"><path d="M65 122V35H249V122H225M65 122H184" stroke="#8e9d7c" strokeWidth="7"/><path d="M75 18H239M269 45V110" stroke="#adb49f"/><text x="155" y="12" textAnchor="middle">Стена A</text><text x="287" y="80" transform="rotate(90 287 80)" textAnchor="middle">Стена B</text><text x="156" y="88" textAnchor="middle" className="setup-area">{Number.isFinite(parse(width)*parse(depth))?((parse(width)*parse(depth))/10000).toFixed(1):'—'} м²</text></svg></div>
         <div className="setup-dimensions">{[{label:'Стена A · ширина',value:width,set:setWidth},{label:'Стена B · глубина',value:depth,set:setDepth},{label:'Высота потолка',value:height,set:setHeight}].map(f=><label key={f.label}><span>{f.label}</span><div><input type="text" inputMode="decimal" aria-label={f.label} value={f.value} onChange={e=>f.set(e.target.value)}/><span>см</span></div></label>)}</div>
         {error&&<p className="setup-error" role="alert">{error}</p>}
       </>:<>
@@ -57,7 +58,7 @@ export default function ProjectSetup({room,hasProject,onContinue,onExample,onCre
         <div className="setup-layouts">{([{id:'straight',name:'Вдоль одной стены',detail:'Прямая кухня',shape:'straight'},{id:'corner',name:'Вдоль двух стен',detail:'Угловая кухня',shape:'corner'}] as const).map(l=><button key={l.id} className={layout===l.id?'active':''} aria-pressed={layout===l.id} onClick={()=>setLayout(l.id)}><span className={`layout-sketch ${l.shape}`}><i/><i/><i/><i/></span><strong>{l.name}</strong><small>{l.detail}</small>{layout===l.id&&<Check size={19}/>}</button>)}</div>
         <label className="setup-template-choice"><input type="checkbox" checked={filled} onChange={e=>setFilled(e.target.checked)}/><span><strong>Добавить начальные модули</strong><small>Мойка, плита и хранение — только то, что помещается. Снимите галочку для сборки с нуля.</small></span></label><div className="setup-room-recap"><Ruler size={18}/>{width} × {depth} см · потолок {height} см</div>
       </>}</div>
-      <footer className="setup-form-footer"><button className="journey-primary" onClick={page==='room'?next:create}>{page==='room'?'Выбрать планировку':'Перейти к сборке'}<ArrowRight size={19}/></button><span>{page==='room'?'Размеры можно изменить в любой момент.':'В следующем шаге вы сможете добавлять шкафы.'}</span></footer>
+      <footer className="setup-form-footer"><button className="journey-primary" onClick={page==='room'?next:create}>{page==='room'?'Выбрать планировку':'Настроить комнату'}<ArrowRight size={19}/></button><span>{page==='room'?'Размеры можно изменить в любой момент.':'Далее добавьте двери и окна на плане комнаты.'}</span></footer>
     </>}
   </section></div>;
 }

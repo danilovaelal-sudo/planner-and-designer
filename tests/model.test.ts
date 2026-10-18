@@ -55,13 +55,13 @@ describe('project interchange',()=>{
   it('rejects nonfinite room values, unknown materials and windows outside the wall',()=>{
     const p=starter();expect(()=>parseProject({...p,room:{...p.room,width:Infinity}})).toThrow();
     expect(()=>parseProject({...p,finishes:{...p.finishes,lower:'unknown'}})).toThrow();
-    expect(()=>parseProject({...p,room:{...p.room,windowOffset:2900}})).toThrow();
+    expect(()=>parseProject({...p,room:{...p.room,openings:p.room.openings.map(o=>({...o,offset:2900}))}})).toThrow();
   });
 });
 
 describe('guided kitchen creation',()=>{
   it('keeps the entered room dimensions and opening parameters for both layouts',()=>{
-    const room={...starter().room,width:4200,depth:2800,height:2500,windowOffset:300,windowWidth:1000};
+    const room={...starter().room,width:4200,depth:2800,height:2500,openings:starter().room.openings.map(o=>o.kind==='window'?{...o,offset:300,width:1000}:o)};
     for(const layout of ['straight','corner'] as const){
       const p=createKitchen(room,layout);
       expect(p.room).toEqual(room);expect(p.cabinets.length).toBeGreaterThan(0);expect(issues(p)).toEqual([]);
@@ -74,7 +74,7 @@ describe('guided kitchen creation',()=>{
   });
   it('only inserts modules that fit, including in small rooms',()=>{
     for(const width of [1800,2400,3600,6000])for(const depth of [1800,3000,5500])for(const layout of ['straight','corner'] as const){
-      const p=createKitchen({...starter().room,width,depth,window:false},layout);
+      const p=createKitchen({...starter().room,width,depth,openings:[]},layout);
       expect(issues(p),`${layout}: ${width} × ${depth}`).toEqual([]);
     }
   });
