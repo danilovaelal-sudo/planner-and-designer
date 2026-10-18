@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { FRONTS, WORKTOPS, bounds, typeOf } from './model';
+import { FRONTS, WORKTOPS, bounds, isFiller, typeOf, worktopThickness } from './model';
 import type { Material, Project } from './model';
 import { WALLS, wallFrame, wallPanels } from './room';
 import type { RoomSelection } from './room';
+import { worktopLayout } from './construction';
 
 function surface(m: Material, textures: THREE.Texture[]) {
   let map: THREE.CanvasTexture | undefined;
@@ -90,14 +91,39 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
     const group=new THREE.Group();group.position.copy(offset).add(new THREE.Vector3(c.x/1000,t.elevation/1000,c.z/1000));group.rotation.y=c.rotation*Math.PI/180;group.userData.cabinetId=c.id;root.add(group);
     const front=materials.get(c.front || (t.category==='wall'?project.finishes.upper:project.finishes.lower))!;
     const plinth=t.category==='wall'?0:.10;
-    mesh(group,cw-.015,ch-plinth,cd-.02,0,(ch+plinth)/2,0,white);
-    if(t.category!=='wall') mesh(group,cw-.018,.095,cd-.10,0,.05,-.04,new THREE.MeshStandardMaterial({color:'#686c5f',roughness:.8}));
+    if(isFiller(c.kind)){
+      mesh(group,cw,ch-plinth,.018,0,(ch+plinth)/2,cd/2-.009,front);
+      if(plinth)mesh(group,cw,plinth,.018,0,plinth/2,cd/2-.065,new THREE.MeshStandardMaterial({color:'#686c5f',roughness:.8}));
+    }else if(c.kind==='corner'){
+      mesh(group,.9,ch-plinth,.6,0,(ch+plinth)/2,-.15,white);
+      mesh(group,.6,ch-plinth,.3,.15,(ch+plinth)/2,.30,white);
+    }else if(c.kind!=='open'){
+      // An actual open carcass instead of a solid block behind glass and fronts.
+      for(const x of [-cw/2+.009,cw/2-.009])mesh(group,.018,ch-plinth,cd-.022,x,(ch+plinth)/2,-.005,white);
+      mesh(group,cw-.036,ch-plinth,.012,0,(ch+plinth)/2,-cd/2+.006,white);
+      mesh(group,cw-.036,.018,cd-.022,0,plinth+.009,-.005,white);
+      if(t.category==='base')for(const z of [-cd/2+.045,cd/2-.045])mesh(group,cw-.036,.018,.07,0,ch-.009,z,white);
+      else mesh(group,cw-.036,.018,cd-.022,0,ch-.009,-.005,white);
+      if(c.kind==='glass')for(const y of [.24,.47])mesh(group,cw-.04,.015,cd-.04,0,y,0,white);
+    }
+    if(t.category!=='wall'&&!isFiller(c.kind)){
+      const plinthMat=new THREE.MeshStandardMaterial({color:'#686c5f',roughness:.8});
+      if(c.kind==='corner'){mesh(group,.9,.095,.50,0,.05,-.20,plinthMat);mesh(group,.54,.095,.30,.18,.05,.30,plinthMat);}
+      else mesh(group,cw-.018,.095,cd-.10,0,.05,-.04,plinthMat);
+    }
     const addHandle=(x:number,y:number,horizontal=true)=>{
       if(project.finishes.handle==='none') return;
       mesh(group,horizontal?Math.min(.16,cw*.45):.012,horizontal?.012:.16,.021,x,y,cd/2+.027,handle);
     };
     const door=(x:number,y:number,width:number,height:number)=>{mesh(group,width,height,.022,x,y,cd/2,front);};
-    if(c.kind==='open') {
+    if(isFiller(c.kind)){
+      // A filler is a plain front panel; its reserved footprint remains the tier depth.
+    }else if(c.kind==='corner'){
+      mesh(group,.294,ch-plinth-.006,.022,-.30,(ch+plinth)/2,.15,front);
+      mesh(group,.022,ch-plinth-.006,.294,-.15,(ch+plinth)/2,.30,front);
+      if(project.finishes.handle!=='none')mesh(group,.012,.16,.021,-.20,ch-.11,.178,handle);
+      if(project.finishes.handle!=='none')mesh(group,.021,.16,.012,-.178,ch-.11,.21,handle);
+    }else if(c.kind==='open') {
       mesh(group,cw-.018,ch,.018,0,ch/2,-cd/2+.012,front);
       for(const y of [.014,ch/2,ch-.014]) mesh(group,cw,.024,cd,0,y,0,front);
       for(const x of [-cw/2+.012,cw/2-.012]) mesh(group,.024,ch,cd,x,ch/2,0,front);
@@ -106,9 +132,10 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
       mesh(group,cw-.04,.59,.035,0,.58,cd/2+.008,dark);
       mesh(group,cw-.095,.40,.006,0,.55,cd/2+.03,new THREE.MeshStandardMaterial({color:'#182322',roughness:.08,metalness:.35}));
       mesh(group,cw-.075,.038,.025,0,.78,cd/2+.048,steel);
-      mesh(group,cw-.06,.026,cd-.08,0,ch+.05,0,dark);
+      const top=ch+worktopThickness(project)/1000;
+      mesh(group,cw-.06,.014,cd-.08,0,top+.007,0,dark);
       for(const x of [-.15,.15]) for(const z of [-.12,.12]) {
-        const ring=new THREE.Mesh(new THREE.RingGeometry(.067,.071,32),new THREE.MeshBasicMaterial({color:'#78847c',side:THREE.DoubleSide}));ring.rotation.x=-Math.PI/2;ring.position.set(x,ch+.064,z);group.add(ring);
+        const ring=new THREE.Mesh(new THREE.RingGeometry(.067,.071,32),new THREE.MeshBasicMaterial({color:'#78847c',side:THREE.DoubleSide}));ring.rotation.x=-Math.PI/2;ring.position.set(x,top+.015,z);group.add(ring);
       }
     } else if(c.kind==='drawers') {
       for(let i=0;i<3;i++){const dh=(ch-plinth)/3;door(0,plinth+dh*(i+.5),cw-.008,dh-.007);addHandle(0,plinth+dh*(i+1)-.055);}
@@ -130,11 +157,16 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
       }
     }
     if(t.category==='base') {
-      const thick=project.finishes.worktop==='darkstone'?.012:project.finishes.worktop==='marble'?.020:.038;
-      mesh(group,cw,thick,cd+.035,0,ch+thick/2,.008,materials.get(project.finishes.worktop)!);
+      const thick=worktopThickness(project)/1000;
       if(c.kind==='sink') {
-        mesh(group,Math.min(cw-.12,.52),.014,.38,0,ch+thick+.006,0,steel);
-        mesh(group,Math.min(cw-.16,.46),.009,.32,0,ch+thick+.014,0,new THREE.MeshStandardMaterial({color:'#66746f',metalness:.8,roughness:.25}));
+        const bw=Math.min(cw-.16,.46),bd=.32,top=ch+thick;
+        for(const x of [-bw/2-.015,bw/2+.015])mesh(group,.03,.012,bd+.06,x,top+.006,0,steel);
+        for(const z of [-bd/2-.015,bd/2+.015])mesh(group,bw,.012,.03,0,top+.006,z,steel);
+        const basin=new THREE.MeshStandardMaterial({color:'#889690',metalness:.8,roughness:.28});
+        mesh(group,bw,.008,bd,0,top-.18,0,basin);
+        for(const x of [-bw/2,bw/2])mesh(group,.006,.18,bd,x,top-.09,0,steel);
+        for(const z of [-bd/2,bd/2])mesh(group,bw,.18,.006,0,top-.09,z,steel);
+        const drain=new THREE.Mesh(new THREE.CylinderGeometry(.025,.025,.004,24),dark);drain.position.set(0,top-.173,0);group.add(drain);
         const curve=new THREE.CatmullRomCurve3([new THREE.Vector3(0,ch+thick,-.24),new THREE.Vector3(0,ch+.30,-.24),new THREE.Vector3(0,ch+.36,-.13),new THREE.Vector3(0,ch+.27,-.05)]);
         const tap=new THREE.Mesh(new THREE.TubeGeometry(curve,24,.012,8,false),steel);group.add(tap);
       }
@@ -143,6 +175,13 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
       const geo=new THREE.BoxGeometry(cw+.018,ch+.018,cd+.018);
       const line=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:'#a5543b',transparent:true,opacity:.9}));line.position.y=ch/2;group.add(line);geo.dispose();
     }
+  }
+  const topLayout=worktopLayout(project);
+  for(const surface of topLayout.surfaces){
+    const shape=new THREE.Shape(surface.outline.map(p=>new THREE.Vector2(p.x/1000,-p.z/1000)));
+    for(const hole of surface.holes)shape.holes.push(new THREE.Path(hole.map(p=>new THREE.Vector2(p.x/1000,-p.z/1000))));
+    const geometry=new THREE.ExtrudeGeometry(shape,{depth:worktopThickness(project)/1000,bevelEnabled:false,curveSegments:1});geometry.rotateX(-Math.PI/2);
+    const top=new THREE.Mesh(geometry,materials.get(project.finishes.worktop)!);top.position.set(-w/2,.870,-d/2);top.castShadow=true;top.receiveShadow=true;root.add(top);
   }
   return root;
 }

@@ -1,12 +1,14 @@
 import { useRef, useState } from 'react';
-import { FRONTS, cabinetIssues, snap, typeOf } from './model';
+import { FRONTS, cabinetIssues, isFiller, snap, typeOf } from './model';
 import type { Cabinet, Project, SnapOptions, Wall } from './model';
 import CabinetGuides from './CabinetGuides';
+import WorktopDrawing, { WorktopElevation } from './WorktopDrawing';
 import RoomDrawing, { Dimension } from './RoomDrawing';
 import { wallFrame, openingSegments } from './room';
 import type { RoomSelection } from './room';
 
 export function ModuleGlyph({kind,color='#a5ad92'}:{kind:string;color?:string}) {
+  if(kind.includes('filler'))return <svg viewBox="0 0 112 88" fill="none" aria-hidden="true"><path d="M45 17 62 11 67 72 50 78Z" fill={color} stroke="#77866c"/><path d="M45 17 50 78 46 75 41 14Z" fill="#bdc7af"/><path d="M49 69 64 64" stroke="#75846b"/></svg>;
   const wall=['wall','glass','open'].includes(kind),tall=['fridge','pantry'].includes(kind);
   const top=tall?5:wall?17:27,bottom=76;
   return <svg viewBox="0 0 112 88" fill="none" aria-hidden="true">
@@ -28,6 +30,7 @@ export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zo
   const {width:w,depth:d}=project.room;
   const focal=project.cabinets.find(c=>c.id===focus),vw=(w+2200)/zoom,vh=(d+2200)/zoom;
   const cx=focal?.x??(w/2-40),cz=focal?.z??(d/2+25);
+  const drawingProject=preview?{...project,cabinets:project.cabinets.map(c=>c.id===preview.id?preview:c)}:project;
   const items=project.cabinets.filter(c=>layer==='wall'?typeOf(c.kind).category==='wall':typeOf(c.kind).category!=='wall');
   return <svg ref={svgRef} className={`plan-svg ${roomMode?'room-plan':''}`} viewBox={`${cx-vw/2} ${cz-vh/2} ${vw} ${vh}`} role="img" aria-label="План комнаты сверху. Выберите стену или проём для настройки."
     onPointerMove={e=>{if(!drag.current)return;const p=point(e),c=drag.current;setPreview(snap({...c.cabinet,x:p.x-c.dx,z:p.y-c.dz},project,snapOptions));}}
@@ -37,6 +40,7 @@ export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zo
     <defs><pattern id="plan-grid" width="100" height="100" patternUnits="userSpaceOnUse"><path d="M100 0H0V100" fill="none" stroke="#d7d7cb" strokeWidth="2"/></pattern><pattern id="plan-wood" width="180" height="1000" patternUnits="userSpaceOnUse"><rect width="180" height="1000" fill="#ece6da"/><path d="M0 0V1000M0 700H180" stroke="#d6cfbf" strokeWidth="3"/></pattern></defs>
     <rect width={w} height={d} fill={showGrid?'url(#plan-grid)':project.finishes.floor==='oak'?'url(#plan-wood)':'#e8e7df'} onPointerDown={()=>onSelect(null)}/>
     <RoomDrawing room={project.room} selection={roomSelection} onSelect={onSelectRoom} arrows={roomMode}/>
+    {layer==='base'&&<WorktopDrawing project={drawingProject}/>}
     {items.map(original=>{
       const c=preview?.id===original.id?preview:original,t=typeOf(c.kind),active=c.id===selected;
       const invalid=cabinetIssues(c,project).some(i=>i.severity==='error');
@@ -45,14 +49,15 @@ export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zo
       return <g key={c.id} transform={`translate(${c.x},${c.z}) rotate(${-c.rotation})`} className={`plan-cabinet ${roomMode?'room-mode-module':''} ${invalid?'invalid-cabinet':''}`} data-cabinet-id={c.id} role="button" tabIndex={0} aria-label={`${t.name}, ${c.width} мм`} aria-pressed={active}
         onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect(c.id);}}}
         onPointerDown={e=>{if(roomMode)return;e.stopPropagation();onSelect(c.id);const p=point(e);drag.current={cabinet:c,dx:p.x-c.x,dz:p.y-c.z};svgRef.current!.setPointerCapture(e.pointerId);}}>
-        <rect x={-c.width/2} y={-t.depth/2} width={c.width} height={t.depth} rx="8" fill={m.color} fillOpacity={t.category==='wall'?.75:.84} stroke={invalid?'#bd4d3a':active?'#a5543b':'#747d6a'} strokeWidth={active?18:7} strokeDasharray={t.category==='wall'?'18 8':undefined}/>
-        <path d={`M${-c.width/2+8} ${t.depth/2-22}H${c.width/2-8}`} stroke={active?'#a5543b':'#68745c'} strokeWidth="16"/>
+        {c.kind==='corner'?<path d="M-450 -450H450V450H-150V150H-450Z" fill={m.color} fillOpacity=".20" stroke={active?'#a5543b':'#747d6a'} strokeWidth={active?18:7}/>:<rect x={-c.width/2} y={-t.depth/2} width={c.width} height={t.depth} rx="8" fill={m.color} fillOpacity={t.category==='wall'?.75:.20} stroke={invalid?'#bd4d3a':active?'#a5543b':'#747d6a'} strokeWidth={active?18:7} strokeDasharray={t.category==='wall'?'18 8':undefined}/>}
+        {c.kind!=='corner'&&<path d={`M${-c.width/2+8} ${t.depth/2-22}H${c.width/2-8}`} stroke={active?'#a5543b':'#68745c'} strokeWidth="16"/>}
         {c.kind==='sink'&&<rect x={-c.width*.30} y={-t.depth*.28} width={c.width*.6} height={t.depth*.55} rx="45" fill="#b9c0b2" stroke="#7d8a79" strokeWidth="8"/>}
         {c.kind==='oven'&&[-1,1].flatMap(x=>[-1,1].map(z=><circle key={`${x}${z}`} cx={x*125} cy={z*110} r="60" fill="#55604d" stroke="#85917a" strokeWidth="8"/>))}
-        <text y={labelY} transform={c.rotation?`rotate(${c.rotation} 0 ${labelY})`:undefined} className="plan-size">{c.width}</text>
+        {(!isFiller(c.kind)||c.width>=100)&&<text y={labelY} transform={c.rotation?`rotate(${c.rotation} 0 ${labelY})`:undefined} className="plan-size">{c.width}</text>}
         {active&&<circle cx={c.width/2} cy={-t.depth/2} r="30" fill="#a5543b" stroke="#fffaf1" strokeWidth="10"/>}
       </g>;
     })}
+    {layer==='base'&&<WorktopDrawing project={drawingProject} outlineOnly/>}
     {!roomMode&&selected&&(()=>{const c=preview??project.cabinets.find(c=>c.id===selected);return c?<CabinetGuides cabinet={c} project={project} minPassage={minPassage}/>:null;})()}
     <text x={70} y={d-100} className="plan-area">{(w*d/1e6).toLocaleString('ru-RU',{maximumFractionDigits:1})} м²</text>
   </svg>;
@@ -71,6 +76,7 @@ export function Elevation({project,wall,selected,onSelect,roomSelection,onSelect
     {items.map(c=>{const t=typeOf(c.kind),x=(c.x-f.x)*f.ux+(c.z-f.z)*f.uz-c.width/2,y=h-t.elevation-t.height,m=FRONTS.find(m=>m.id===(c.front||(t.category==='wall'?project.finishes.upper:project.finishes.lower)))!;
       return <g key={c.id} onClick={()=>onSelect(c.id)} role="button" tabIndex={0} onKeyDown={e=>{if(e.key==='Enter')onSelect(c.id);}} aria-label={`${t.name}, ${c.width} мм`} className="elevation-module"><rect x={x} y={y} width={c.width} height={t.height} fill={m.color} stroke={selected===c.id?'#a5543b':'#7e8974'} strokeWidth={selected===c.id?18:6}/>{t.category!=='wall'&&<rect x={x} y={h-100} width={c.width} height="100" fill="#727b67"/>}{c.kind==='drawers'?[1,2].map(n=><path key={n} d={`M${x} ${y+(t.height-100)*n/3}h${c.width}`} stroke="#737f67" strokeWidth="6"/>):c.kind==='oven'?<rect x={x+30} y={y+80} width={c.width-60} height="580" fill="#3c483e"/>:c.kind==='open'?<>{[20,350].map(n=><rect key={n} x={x+20} y={y+n} width={c.width-40} height="300" fill="#69775d"/>)}</>:<path d={`M${x+c.width-65} ${y+120}v100`} stroke="#d6bc82" strokeWidth="16"/>}<text x={x+c.width/2} y={y+t.height/2} className="plan-size">{c.width}</text></g>;
     })}
+    <WorktopElevation project={project} wall={wall}/>
     {openingSegments(room,wall).map((s,i)=><Dimension key={i} from={[s.start,h+200]} to={[s.end,h+200]} label={s.length>=150?String(s.length):''} small/>)}
     <Dimension from={[0,h+450]} to={[length,h+450]} label={`${length} мм · стена ${wall}`} onClick={()=>onSelectRoom?.({kind:'wall',wall})}/>
     <Dimension from={[-350,0]} to={[-350,h]} label={`${h} мм`} vertical/>

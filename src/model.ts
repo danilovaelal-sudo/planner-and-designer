@@ -2,11 +2,11 @@ import { defaultRoom, emptyRoom, validateRoom, wallFrame, wallPoint } from './ro
 import type { Opening, Room, Wall } from './room';
 export type { Room, Wall } from './room';
 export type Category = 'base' | 'wall' | 'tall';
-export type Kind = 'base' | 'drawers' | 'sink' | 'oven' | 'dishwasher' | 'corner' | 'wall' | 'glass' | 'open' | 'fridge' | 'pantry';
+export type Kind = 'base' | 'drawers' | 'sink' | 'oven' | 'dishwasher' | 'corner' | 'wall' | 'glass' | 'open' | 'fridge' | 'pantry' | 'filler' | 'wall-filler' | 'tall-filler';
 export type View = '3d' | 'plan' | 'elevation';
 export interface ModuleType {
   kind: Kind; name: string; description: string; category: Category;
-  widths: number[]; depth: number; height: number; elevation: number;
+  widths: number[]; widthRange?: {min:number;max:number}; depth: number; height: number; elevation: number;
 }
 export const MODULES: ModuleType[] = [
   { kind: 'base', name: 'Шкаф с полками', description: 'Распашной · 1–2 дверцы', category: 'base', widths: [300, 400, 450, 500, 600, 800, 900], depth: 600, height: 870, elevation: 0 },
@@ -20,11 +20,17 @@ export const MODULES: ModuleType[] = [
   { kind: 'open', name: 'Открытые полки', description: 'Два открытых отделения', category: 'wall', widths: [300, 400, 600, 800], depth: 320, height: 720, elevation: 1450 },
   { kind: 'fridge', name: 'Пенал с холодильником', description: 'Встроенный холодильник', category: 'tall', widths: [600], depth: 600, height: 2170, elevation: 0 },
   { kind: 'pantry', name: 'Пенал для хранения', description: 'Две секции с полками', category: 'tall', widths: [400, 500, 600], depth: 600, height: 2170, elevation: 0 },
+  { kind:'filler', name:'Нижний добор', description:'Панель для промежутка · 10–300 мм', category:'base', widths:[10,20,30,50,100,150,200,300], widthRange:{min:10,max:300}, depth:600,height:870,elevation:0 },
+  { kind:'wall-filler', name:'Верхний добор', description:'Панель между навесными шкафами', category:'wall', widths:[10,20,30,50,100,150,200,300], widthRange:{min:10,max:300}, depth:350,height:720,elevation:1450 },
+  { kind:'tall-filler', name:'Добор для пенала', description:'Высокая панель · 10–300 мм', category:'tall', widths:[10,20,30,50,100,150,200,300], widthRange:{min:10,max:300}, depth:600,height:2170,elevation:0 },
 ];
 export const typeOf = (kind: Kind) => MODULES.find(m => m.kind === kind)!;
+export const isFiller=(kind:Kind)=>kind==='filler'||kind==='wall-filler'||kind==='tall-filler';
+export const validWidth=(t:ModuleType,width:number)=>Number.isInteger(width)&&(t.widths.includes(width)||!!t.widthRange&&width>=t.widthRange.min&&width<=t.widthRange.max);
 export interface Cabinet { id: string; kind: Kind; width: number; x: number; z: number; rotation: number; front?: string; hinge: 'left' | 'right'; }
 export interface Finishes { lower: string; upper: string; worktop: string; handle: 'black' | 'brass' | 'none'; floor: 'oak' | 'stone'; wall: 'cream' | 'white' | 'sand'; }
-export interface Project { version: 2; name: string; room: Room; cabinets: Cabinet[]; finishes: Finishes; }
+export interface ConstructionSettings { frontOverhang:number; bridgeGap:number; }
+export interface Project { construction?:ConstructionSettings; version: 2; name: string; room: Room; cabinets: Cabinet[]; finishes: Finishes; }
 export interface Material { id: string; name: string; color: string; family: string; surface: string; wood?: boolean; stone?: boolean; note: string; }
 export const FRONTS: Material[] = [
   { id: 'linen', name: 'Тёплый белый', color: '#e9e5d8', family: 'МДФ · эмаль', surface: 'Матовая', note: 'Универсальная палитра. Конкретный оттенок выбирается по образцу.' },
@@ -228,10 +234,11 @@ export function parseProject(value: unknown): Project {
   for(const c of p.cabinets) {
     if(!c || typeof c!=='object')throw new Error('Некорректный модуль в проекте');
     const t=MODULES.find(t=>t.kind===c.kind);
-    if(!t||typeof c.id!=='string'||c.id.length>100||ids.has(c.id)||!t.widths.includes(c.width)||!num(c.x,-8000,16000)||!num(c.z,-8000,16000)||![0,90,180,270].includes(c.rotation)||!['left','right'].includes(c.hinge)||(c.front!==undefined&&!FRONTS.some(m=>m.id===c.front))) throw new Error('Некорректный модуль в проекте');
+    if(!t||typeof c.id!=='string'||c.id.length>100||ids.has(c.id)||!validWidth(t,c.width)||!num(c.x,-8000,16000)||!num(c.z,-8000,16000)||![0,90,180,270].includes(c.rotation)||!['left','right'].includes(c.hinge)||(c.front!==undefined&&!FRONTS.some(m=>m.id===c.front))) throw new Error('Некорректный модуль в проекте');
     ids.add(c.id);
   }
+  if(p.construction!==undefined){const settings=p.construction;if(!settings||!Number.isInteger(settings.frontOverhang)||!num(settings.frontOverhang,0,60)||!Number.isInteger(settings.bridgeGap)||!num(settings.bridgeGap,0,100))throw new Error('Некорректные настройки столешницы');}
   const f=p.finishes;
   if(!FRONTS.some(m=>m.id===f.lower)||!FRONTS.some(m=>m.id===f.upper)||!WORKTOPS.some(m=>m.id===f.worktop)||!['black','brass','none'].includes(f.handle)||!['oak','stone'].includes(f.floor)||!['cream','white','sand'].includes(f.wall)) throw new Error('Неизвестный материал');
-  return {version:2,name:p.name,room:{width:r.width,depth:r.depth,height:r.height,walls:{A:{thickness:r.walls.A.thickness},B:{thickness:r.walls.B.thickness},C:{thickness:r.walls.C.thickness},D:{thickness:r.walls.D.thickness}},openings:r.openings.map(o=>({id:o.id,kind:o.kind,wall:o.wall,offset:o.offset,width:o.width,height:o.height,sill:o.sill,hinge:o.hinge,swing:o.swing}))},finishes:{lower:f.lower,upper:f.upper,worktop:f.worktop,handle:f.handle,floor:f.floor,wall:f.wall},cabinets:p.cabinets.map(c=>({id:c.id,kind:c.kind,width:c.width,x:c.x,z:c.z,rotation:c.rotation,hinge:c.hinge,...(c.front?{front:c.front}:{})}))};
+  return {...(p.construction?{construction:{frontOverhang:p.construction.frontOverhang,bridgeGap:p.construction.bridgeGap}}:{}),version:2,name:p.name,room:{width:r.width,depth:r.depth,height:r.height,walls:{A:{thickness:r.walls.A.thickness},B:{thickness:r.walls.B.thickness},C:{thickness:r.walls.C.thickness},D:{thickness:r.walls.D.thickness}},openings:r.openings.map(o=>({id:o.id,kind:o.kind,wall:o.wall,offset:o.offset,width:o.width,height:o.height,sill:o.sill,hinge:o.hinge,swing:o.swing}))},finishes:{lower:f.lower,upper:f.upper,worktop:f.worktop,handle:f.handle,floor:f.floor,wall:f.wall},cabinets:p.cabinets.map(c=>({id:c.id,kind:c.kind,width:c.width,x:c.x,z:c.z,rotation:c.rotation,hinge:c.hinge,...(c.front?{front:c.front}:{})}))};
 }

@@ -5,5 +5,6 @@ import './styles.css';
 import './journey.css';
 import './room.css';
 import './assembly.css';
+import './construction.css';
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
