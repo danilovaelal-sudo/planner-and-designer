@@ -6,6 +6,9 @@ import type { Material, Project } from './model';
 import { WALLS, wallFrame, wallPanels } from './room';
 import type { RoomSelection } from './room';
 import { worktopLayout } from './construction';
+import { populateFronts } from './frontScene';
+import { frontAssemblies, pieceVertices } from './openings';
+import type { MotionIssue, OpeningPreviews } from './openings';
 
 function surface(m: Material, textures: THREE.Texture[]) {
   let map: THREE.CanvasTexture | undefined;
@@ -23,7 +26,7 @@ function surface(m: Material, textures: THREE.Texture[]) {
   return new THREE.MeshStandardMaterial({color:map?'#ffffff':m.color,map,roughness:m.wood?.68:.77});
 }
 
-function populate(scene:THREE.Scene,project:Project,selected:string|null,textures:THREE.Texture[],roomSelection:RoomSelection) {
+function populate(scene:THREE.Scene,project:Project,selected:string|null,textures:THREE.Texture[],roomSelection:RoomSelection,openingPreviews:OpeningPreviews,openingConflicts:MotionIssue[]) {
   const root=new THREE.Group();scene.add(root);
   const w=project.room.width/1000,d=project.room.depth/1000,h=project.room.height/1000;
   const offset=new THREE.Vector3(-w/2,0,-d/2);
@@ -95,8 +98,12 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
       mesh(group,cw,ch-plinth,.018,0,(ch+plinth)/2,cd/2-.009,front);
       if(plinth)mesh(group,cw,plinth,.018,0,plinth/2,cd/2-.065,new THREE.MeshStandardMaterial({color:'#686c5f',roughness:.8}));
     }else if(c.kind==='corner'){
-      mesh(group,.9,ch-plinth,.6,0,(ch+plinth)/2,-.15,white);
-      mesh(group,.6,ch-plinth,.3,.15,(ch+plinth)/2,.30,white);
+      mesh(group,.9,ch-plinth,.018,0,(ch+plinth)/2,-.441,white);
+      mesh(group,.018,ch-plinth,.9,.441,(ch+plinth)/2,0,white);
+      mesh(group,.018,ch-plinth,.6,-.441,(ch+plinth)/2,-.15,white);
+      mesh(group,.6,ch-plinth,.018,.15,(ch+plinth)/2,.441,white);
+      for(const y of [plinth+.009,.48,ch-.009]){mesh(group,.882,.018,.582,0,y,-.15,white);mesh(group,.582,.018,.30,.15,y,.30,white);}
+
     }else if(c.kind!=='open'){
       // An actual open carcass instead of a solid block behind glass and fronts.
       for(const x of [-cw/2+.009,cw/2-.009])mesh(group,.018,ch-plinth,cd-.022,x,(ch+plinth)/2,-.005,white);
@@ -104,58 +111,37 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
       mesh(group,cw-.036,.018,cd-.022,0,plinth+.009,-.005,white);
       if(t.category==='base')for(const z of [-cd/2+.045,cd/2-.045])mesh(group,cw-.036,.018,.07,0,ch-.009,z,white);
       else mesh(group,cw-.036,.018,cd-.022,0,ch-.009,-.005,white);
-      if(c.kind==='glass')for(const y of [.24,.47])mesh(group,cw-.04,.015,cd-.04,0,y,0,white);
+      if(c.kind==='base'||c.kind==='wall'||c.kind==='glass')for(const y of (c.kind==='base'?[.38,.64]:[.24,.47]))mesh(group,cw-.04,.015,cd-.04,0,y,0,white);
     }
+    if(c.kind==='fridge'||c.kind==='pantry')for(const y of [.38,.65,1.0,1.35,1.7,2.0])mesh(group,cw-.045,.016,cd-.06,0,y,0,white);
     if(t.category!=='wall'&&!isFiller(c.kind)){
       const plinthMat=new THREE.MeshStandardMaterial({color:'#686c5f',roughness:.8});
       if(c.kind==='corner'){mesh(group,.9,.095,.50,0,.05,-.20,plinthMat);mesh(group,.54,.095,.30,.18,.05,.30,plinthMat);}
       else mesh(group,cw-.018,.095,cd-.10,0,.05,-.04,plinthMat);
     }
-    const addHandle=(x:number,y:number,horizontal=true)=>{
-      if(project.finishes.handle==='none') return;
-      mesh(group,horizontal?Math.min(.16,cw*.45):.012,horizontal?.012:.16,.021,x,y,cd/2+.027,handle);
-    };
-    const door=(x:number,y:number,width:number,height:number)=>{mesh(group,width,height,.022,x,y,cd/2,front);};
-    if(isFiller(c.kind)){
-      // A filler is a plain front panel; its reserved footprint remains the tier depth.
-    }else if(c.kind==='corner'){
-      mesh(group,.294,ch-plinth-.006,.022,-.30,(ch+plinth)/2,.15,front);
-      mesh(group,.022,ch-plinth-.006,.294,-.15,(ch+plinth)/2,.30,front);
-      if(project.finishes.handle!=='none')mesh(group,.012,.16,.021,-.20,ch-.11,.178,handle);
-      if(project.finishes.handle!=='none')mesh(group,.021,.16,.012,-.178,ch-.11,.21,handle);
-    }else if(c.kind==='open') {
+    if(c.kind==='open'){
       mesh(group,cw-.018,ch,.018,0,ch/2,-cd/2+.012,front);
-      for(const y of [.014,ch/2,ch-.014]) mesh(group,cw,.024,cd,0,y,0,front);
-      for(const x of [-cw/2+.012,cw/2-.012]) mesh(group,.024,ch,cd,x,ch/2,0,front);
-    } else if(c.kind==='oven') {
-      door(0,.19,cw-.008,.17);
-      mesh(group,cw-.04,.59,.035,0,.58,cd/2+.008,dark);
-      mesh(group,cw-.095,.40,.006,0,.55,cd/2+.03,new THREE.MeshStandardMaterial({color:'#182322',roughness:.08,metalness:.35}));
-      mesh(group,cw-.075,.038,.025,0,.78,cd/2+.048,steel);
+      for(const y of [.014,ch/2,ch-.014])mesh(group,cw,.024,cd,0,y,0,front);
+      for(const x of [-cw/2+.012,cw/2-.012])mesh(group,.024,ch,cd,x,ch/2,0,front);
+    }
+    if(c.kind==='oven'){
+      mesh(group,cw-.04,.52,.018,0,.54,-cd/2+.02,dark);
+      for(const x of [-cw/2+.028,cw/2-.028])mesh(group,.02,.52,cd-.03,x,.54,0,dark);
+      mesh(group,cw-.04,.025,cd-.03,0,.295,0,dark);
+      mesh(group,cw-.04,.065,.035,0,.8325,cd/2+.015,dark);
+      for(const x of [-.16,-.08,.08,.16])mesh(group,.023,.023,.012,x,.835,cd/2+.038,steel);
+      for(const y of [.40,.55])for(let x=-cw/2+.07;x<cw/2-.05;x+=.06)mesh(group,.004,.004,cd-.08,x,y,0,steel);
       const top=ch+worktopThickness(project)/1000;
       mesh(group,cw-.06,.014,cd-.08,0,top+.007,0,dark);
-      for(const x of [-.15,.15]) for(const z of [-.12,.12]) {
+      for(const x of [-.15,.15])for(const z of [-.12,.12]){
         const ring=new THREE.Mesh(new THREE.RingGeometry(.067,.071,32),new THREE.MeshBasicMaterial({color:'#78847c',side:THREE.DoubleSide}));ring.rotation.x=-Math.PI/2;ring.position.set(x,top+.015,z);group.add(ring);
       }
-    } else if(c.kind==='drawers') {
-      for(let i=0;i<3;i++){const dh=(ch-plinth)/3;door(0,plinth+dh*(i+.5),cw-.008,dh-.007);addHandle(0,plinth+dh*(i+1)-.055);}
-    } else if(c.kind==='fridge'||c.kind==='pantry') {
-      const split=c.kind==='fridge'?.72:1.1;
-      door(0,plinth+(split-plinth)/2,cw-.008,split-plinth-.008);door(0,split+(ch-split)/2,cw-.008,ch-split-.008);
-      const hx=c.hinge==='left'?cw/2-.055:-cw/2+.055;addHandle(hx,split-.12,false);addHandle(hx,split+.14,false);
-    } else if(c.kind==='glass') {
-      const glass=new THREE.MeshStandardMaterial({color:'#758579',transparent:true,opacity:.65,roughness:.15,metalness:.1});
-      mesh(group,cw-.045,ch-.04,.025,0,ch/2,cd/2,glass);
-      for(const x of [-cw/2+.025,cw/2-.025]) mesh(group,.04,ch,.03,x,ch/2,cd/2+.012,front);
-      for(const y of [.02,ch-.02]) mesh(group,cw,.04,.03,0,y,cd/2+.012,front);
-      addHandle(cw/2-.07,.11,false);
-    } else {
-      const count=cw>.65?2:1;
-      for(let i=0;i<count;i++) {
-        const dw=cw/count;const x=-cw/2+dw*(i+.5);door(x,(ch+plinth)/2,dw-.006,ch-plinth-.006);
-        addHandle(count===2?x+(i===0?1:-1)*(dw/2-.055):x+(c.hinge==='left'?1:-1)*(dw/2-.055),t.category==='wall'?.13:ch-.11,false);
-      }
     }
+    if(c.kind==='dishwasher')for(const y of [.38,.64]){
+      for(let x=-cw/2+.055;x<cw/2-.04;x+=.055)mesh(group,.004,.004,cd-.10,x,y,0,steel);
+      for(let z=-cd/2+.05;z<cd/2-.03;z+=.055)mesh(group,cw-.09,.004,.004,0,y,z,steel);
+    }
+    populateFronts(group,c,openingPreviews[c.id],openingConflicts,{front,white,dark,steel,handle,handles:project.finishes.handle!=='none'});
     if(t.category==='base') {
       const thick=worktopThickness(project)/1000;
       if(c.kind==='sink') {
@@ -186,7 +172,7 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
   return root;
 }
 
-export default function Scene({project,selected,onSelect,resetKey,onReady,cameraMode='kitchen',zoom=1,roomSelection=null,onSelectRoom}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;resetKey:number;onReady:(canvas:HTMLCanvasElement|null)=>void;cameraMode?:'kitchen'|'room'|'selected';zoom?:number;roomSelection?:RoomSelection;onSelectRoom?:(s:RoomSelection)=>void}) {
+export default function Scene({project,selected,onSelect,resetKey,onReady,cameraMode='kitchen',zoom=1,roomSelection=null,onSelectRoom,openingPreviews={},openingConflicts=[]}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;resetKey:number;onReady:(canvas:HTMLCanvasElement|null)=>void;cameraMode?:'kitchen'|'room'|'selected';zoom?:number;roomSelection?:RoomSelection;onSelectRoom?:(s:RoomSelection)=>void;openingPreviews?:OpeningPreviews;openingConflicts?:MotionIssue[]}) {
   const host=useRef<HTMLDivElement>(null);
   const rendererRef=useRef<THREE.WebGLRenderer|null>(null);
   const cameraRef=useRef<THREE.PerspectiveCamera|null>(null);
@@ -196,7 +182,7 @@ export default function Scene({project,selected,onSelect,resetKey,onReady,camera
   const clickRef=useRef(onSelect);clickRef.current=onSelect;
   const roomClickRef=useRef(onSelectRoom);roomClickRef.current=onSelectRoom;
   const readyRef=useRef(onReady);readyRef.current=onReady;
-  const stateRef=useRef({project,selected,cameraMode,zoom});stateRef.current={project,selected,cameraMode,zoom};
+  const stateRef=useRef({project,selected,cameraMode,zoom,openingPreviews});stateRef.current={project,selected,cameraMode,zoom,openingPreviews};
   const fitRef=useRef<()=>void>(()=>{});
   const [failed,setFailed]=useState(false);
   const initRoom=useRef(project.room);
@@ -210,12 +196,13 @@ export default function Scene({project,selected,onSelect,resetKey,onReady,camera
     const camera=new THREE.PerspectiveCamera(37,1,.01,80);cameraRef.current=camera;
     const controls=new OrbitControls(camera,renderer.domElement);controlsRef.current=controls;controls.enableDamping=true;controls.dampingFactor=.08;controls.maxPolarAngle=Math.PI/2-.025;controls.minDistance=2;controls.maxDistance=18;
     fitRef.current=()=>{
-      const {project:p,selected:id,cameraMode:mode,zoom:magnification}=stateRef.current;
+      const {project:p,selected:id,cameraMode:mode,zoom:magnification,openingPreviews:previews}=stateRef.current;
       const w=p.room.width/1000,d=p.room.depth/1000;
       const box=new THREE.Box3();
       const items=mode==='selected'&&id?p.cabinets.filter(c=>c.id===id):p.cabinets;
       if(mode==='room'||!items.length){box.set(new THREE.Vector3(-w/2,0,-d/2),new THREE.Vector3(w/2,p.room.height/1000,d/2));}
       else for(const c of items){const b=bounds(c),t=typeOf(c.kind);box.expandByPoint(new THREE.Vector3(b.minX/1000-w/2,t.elevation/1000,b.minZ/1000-d/2));box.expandByPoint(new THREE.Vector3(b.maxX/1000-w/2,(t.elevation+t.height)/1000,b.maxZ/1000-d/2));}
+      if(mode!=='room')for(const c of items)if(mode==='selected'||previews[c.id]?.progress){for(const part of frontAssemblies(c))for(const piece of part.pieces)for(const progress of [0,50,100])for(const p of pieceVertices(c,part,piece,progress))box.expandByPoint(new THREE.Vector3(p.x/1000-w/2,p.y/1000,p.z/1000-d/2));}
       const center=box.getCenter(new THREE.Vector3()),direction=new THREE.Vector3(-1,.72,1.35).normalize();
       const right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),direction).normalize(),up=new THREE.Vector3().crossVectors(direction,right).normalize();
       const tan=Math.tan(THREE.MathUtils.degToRad(camera.fov/2));let distance=1.5;
@@ -251,9 +238,9 @@ export default function Scene({project,selected,onSelect,resetKey,onReady,camera
     return()=>{resize.disconnect();renderer.setAnimationLoop(null);controls.dispose();renderer.domElement.removeEventListener('pointerdown',pointerdown);renderer.domElement.removeEventListener('pointerup',pointerup);renderer.dispose();renderer.domElement.remove();readyRef.current(null);rendererRef.current=null;sceneRef.current=null;};
   },[]);
   useEffect(()=>{
-    if(!sceneRef.current) return;const textures:THREE.Texture[]=[];const scene=sceneRef.current;const root=populate(scene,project,selected,textures,roomSelection);dirtyRef.current=true;
+    if(!sceneRef.current) return;const textures:THREE.Texture[]=[];const scene=sceneRef.current;const root=populate(scene,project,selected,textures,roomSelection,openingPreviews,openingConflicts);dirtyRef.current=true;
     return()=>{scene.remove(root);const materials=new Set<THREE.Material>();root.traverse(obj=>{if(obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments){obj.geometry.dispose();if(Array.isArray(obj.material))obj.material.forEach(m=>materials.add(m));else materials.add(obj.material);}});materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());};
-  },[project,selected,roomSelection]);
-  useEffect(()=>{fitRef.current();},[resetKey,project.room.width,project.room.depth,project.cabinets.length,cameraMode,zoom,cameraMode==='selected'?selected:null]);
+  },[project,selected,roomSelection,openingPreviews,openingConflicts]);
+  useEffect(()=>{fitRef.current();},[resetKey,project.room.width,project.room.depth,project.cabinets.length,cameraMode,zoom,cameraMode==='selected'?selected:null,Object.keys(openingPreviews).filter(id=>openingPreviews[id].progress>0).sort().join('|')]);
   return <div ref={host} className="scene-host" aria-label="Интерактивная 3D-модель кухни">{failed&&<div className="scene-error"><strong>3D недоступен в этом браузере</strong><p>Используйте вид «План 2D» или включите аппаратное ускорение.</p></div>}</div>;
 }

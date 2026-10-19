@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import { FRONTS, cabinetIssues, isFiller, snap, typeOf } from './model';
 import type { Cabinet, Project, SnapOptions, Wall } from './model';
 import CabinetGuides from './CabinetGuides';
+import MotionOverlay from './MotionOverlay';
+import type { MotionIssue, OpeningPreviews } from './openings';
 import WorktopDrawing, { WorktopElevation } from './WorktopDrawing';
 import RoomDrawing, { Dimension } from './RoomDrawing';
 import { wallFrame, openingSegments } from './room';
@@ -22,7 +24,7 @@ export function ModuleGlyph({kind,color='#a5ad92'}:{kind:string;color?:string}) 
   </svg>;
 }
 
-export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zoom=1,focus=null,roomMode=false,roomSelection=null,onSelectRoom,snapOptions,minPassage=900}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;onMove:(c:Cabinet)=>void;layer:'base'|'wall';showGrid:boolean;zoom?:number;focus?:string|null;roomMode?:boolean;roomSelection?:RoomSelection;onSelectRoom?:(s:RoomSelection)=>void;snapOptions?:SnapOptions;minPassage?:number}) {
+export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zoom=1,focus=null,roomMode=false,roomSelection=null,onSelectRoom,snapOptions,minPassage=900,openingPreviews={},openingIssues=[],showOpeningZones=false}:{project:Project;selected:string|null;onSelect:(id:string|null)=>void;onMove:(c:Cabinet)=>void;layer:'base'|'wall';showGrid:boolean;zoom?:number;focus?:string|null;roomMode?:boolean;roomSelection?:RoomSelection;onSelectRoom?:(s:RoomSelection)=>void;snapOptions?:SnapOptions;minPassage?:number;openingPreviews?:OpeningPreviews;openingIssues?:MotionIssue[];showOpeningZones?:boolean}) {
   const svgRef=useRef<SVGSVGElement>(null);
   const drag=useRef<{cabinet:Cabinet;dx:number;dz:number}|null>(null);
   const [preview,setPreview]=useState<Cabinet|null>(null);
@@ -41,6 +43,7 @@ export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zo
     <rect width={w} height={d} fill={showGrid?'url(#plan-grid)':project.finishes.floor==='oak'?'url(#plan-wood)':'#e8e7df'} onPointerDown={()=>onSelect(null)}/>
     <RoomDrawing room={project.room} selection={roomSelection} onSelect={onSelectRoom} arrows={roomMode}/>
     {layer==='base'&&<WorktopDrawing project={drawingProject}/>}
+    {!roomMode&&showOpeningZones&&<MotionOverlay project={drawingProject} previews={openingPreviews} issues={openingIssues} layer={layer} zones/>}
     {items.map(original=>{
       const c=preview?.id===original.id?preview:original,t=typeOf(c.kind),active=c.id===selected;
       const invalid=cabinetIssues(c,project).some(i=>i.severity==='error');
@@ -58,6 +61,7 @@ export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zo
       </g>;
     })}
     {layer==='base'&&<WorktopDrawing project={drawingProject} outlineOnly/>}
+    {!roomMode&&<MotionOverlay project={drawingProject} previews={openingPreviews} issues={openingIssues} layer={layer}/>}
     {!roomMode&&selected&&(()=>{const c=preview??project.cabinets.find(c=>c.id===selected);return c?<CabinetGuides cabinet={c} project={project} minPassage={minPassage}/>:null;})()}
     <text x={70} y={d-100} className="plan-area">{(w*d/1e6).toLocaleString('ru-RU',{maximumFractionDigits:1})} м²</text>
   </svg>;

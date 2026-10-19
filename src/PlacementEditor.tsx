@@ -49,6 +49,6 @@ export default function PlacementEditor({project,cabinet:c,onApply,step,onStep,g
     <div className="assembly-move-pad">{[{label:'Подвинуть шкаф влево',dx:-step,dz:0,icon:<ArrowLeft size={20}/>},{label:'Подвинуть шкаф вверх на плане',dx:0,dz:-step,icon:<ArrowUp size={20}/>},{label:'Подвинуть шкаф вниз на плане',dx:0,dz:step,icon:<ArrowDown size={20}/>},{label:'Подвинуть шкаф вправо',dx:step,dz:0,icon:<ArrowRight size={20}/>}].map(a=><button key={a.label} aria-label={a.label} onClick={()=>apply(()=>({...c,x:c.x+a.dx,z:c.z+a.dz}))}>{a.icon}</button>)}</div>
     {error&&<p className="assembly-error" role="alert">{error}</p>}
     {warnings.length>0&&<div className="selected-placement-issues"><h3><TriangleAlert size={17}/>Проверьте положение</h3>{warnings.map((w,i)=><p key={i}>{w.message}</p>)}</div>}
-    <p className="assembly-note">Применение проверяет стены, шкафы, проёмы и открывание входной двери. Створки окон и открывание мебельных фасадов пока не моделируются.</p>
+    <p className="assembly-note">Применение проверяет стены, шкафы, проёмы и открывание входной двери. Открывание мебели проверьте в блоке «Открывание». Створки окон пока не моделируются.</p>
   </section>;
 }
