@@ -1,5 +1,6 @@
+import { RoomObjectsPlan } from './RoomObjectsDrawing';
 import type { KeyboardEvent } from 'react';
-import { WALLS, openingSegments, wallFrame, wallLength } from './room';
+import { WALLS, openingSegments, wallFrame, wallLength, roomFloorArea } from './room';
 import type { Opening, Room, RoomSelection } from './room';
 
 const activate = (e: KeyboardEvent, action: () => void) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); action(); } };
@@ -57,6 +58,6 @@ export default function RoomDrawing({room,selection=null,onSelect,dimensions=tru
 }
 export function RoomOverview({room,selection,onSelect}:{room:Room;selection:RoomSelection;onSelect:(s:RoomSelection)=>void}) {
   const margin=750;
-  return <svg className="room-overview" viewBox={`${-margin} ${-margin} ${room.width+2*margin} ${room.depth+2*margin}`} aria-label="Выберите стену или проём на схеме комнаты"><rect width={room.width} height={room.depth} fill="#f1f2e8"/><RoomDrawing room={room} selection={selection} onSelect={onSelect} dimensions={false} arrows/><text x={room.width/2} y={room.depth/2} className="overview-area">{(room.width*room.depth/1e6).toLocaleString('ru-RU',{maximumFractionDigits:2})} м²</text></svg>;
+  return <svg className="room-overview" viewBox={`${-margin} ${-margin} ${room.width+2*margin} ${room.depth+2*margin}`} aria-label="Выберите стену или проём на схеме комнаты"><rect width={room.width} height={room.depth} fill="#f1f2e8"/><RoomDrawing room={room} selection={selection} onSelect={onSelect} dimensions={false} arrows/><RoomObjectsPlan room={room} selection={selection} onSelect={onSelect}/><text x={room.width/2} y={room.depth/2} className="overview-area">{(roomFloorArea(room)/1e6).toLocaleString('ru-RU',{maximumFractionDigits:2})} м²</text></svg>;
 }
 export const openingRemainder=(room:Room,o:Opening)=>wallLength(room,o.wall)-o.offset-o.width;

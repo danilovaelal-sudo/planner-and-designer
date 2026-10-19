@@ -1,14 +1,14 @@
 import { bounds, isFiller, typeOf, worktopThickness } from './model';
 import type { Cabinet, Project } from './model';
 import { localRect } from './construction';
-import { wallPoint } from './room';
+import { roomObjectBounds, roomObjectType, wallPoint } from './room';
 
 export interface Vec3 {x:number;y:number;z:number;}
 export interface FrontPiece {center:Vec3;size:Vec3;yaw:number;style:'front'|'glass'|'oven'|'tray';}
 export interface FrontAssembly {id:string;label:string;mode:'swing'|'drawer'|'fold';pivot:Vec3;sign:number;travel:number;pieces:FrontPiece[];}
 export interface OpeningPreview {target:string;progress:number;}
 export type OpeningPreviews=Record<string,OpeningPreview>;
-export interface MotionIssue {id:string;partId:string;otherId?:string;openingId?:string;kind:'wall'|'cabinet'|'entry-door'|'front';severity:'warning';message:string;}
+export interface MotionIssue {id:string;partId:string;otherId?:string;openingId?:string;roomObjectId?:string;kind:'wall'|'cabinet'|'entry-door'|'front'|'room-object';severity:'warning';message:string;}
 const vec=(x=0,y=0,z=0):Vec3=>({x,y,z});
 const plus=(a:Vec3,b:Vec3):Vec3=>vec(a.x+b.x,a.y+b.y,a.z+b.z);
 const minus=(a:Vec3,b:Vec3):Vec3=>vec(a.x-b.x,a.y-b.y,a.z-b.z);
@@ -71,7 +71,7 @@ export function boxesIntersect(a:BoxPose,b:BoxPose,padding=0){
     if(Math.abs(dot(delta,unit))>=ra+rb+padding-.01)return false;
   }return true;
 }
-interface Obstacle {id:string;label:string;kind:'cabinet'|'entry-door';min:Vec3;max:Vec3;}
+interface Obstacle {id:string;label:string;kind:'cabinet'|'entry-door'|'room-object';min:Vec3;max:Vec3;}
 function obstacleBox(o:Obstacle):BoxPose{
   const center=vec((o.min.x+o.max.x)/2,(o.min.y+o.max.y)/2,(o.min.z+o.max.z)/2),half=[(o.max.x-o.min.x)/2,(o.max.y-o.min.y)/2,(o.max.z-o.min.z)/2];
   return {center,half,axes:[vec(1,0,0),vec(0,1,0),vec(0,0,1)],vertices:[-1,1].flatMap(x=>[-1,1].flatMap(y=>[-1,1].map(z=>vec(center.x+x*half[0],center.y+y*half[1],center.z+z*half[2]))))};
@@ -87,6 +87,7 @@ function obstacles(p:Project,owner:string):Obstacle[]{
       for(const top of tops)result.push({id:c.id,label:'Столешница',kind:'cabinet',min:vec(top.minX,870,top.minZ),max:vec(top.maxX,870+worktopThickness(p),top.maxZ)});
     }
   }
+  for(const o of p.room.objects??[])if(roomObjectType(o.kind).solid){const r=roomObjectBounds(p.room,o);result.push({id:o.id,label:o.label,kind:'room-object',min:vec(r.minX,r.bottom,r.minZ),max:vec(r.maxX,r.top,r.maxZ)});}
   for(const door of p.room.openings.filter(o=>o.kind==='door'&&o.swing==='in')){
     const pivot=door.hinge==='left'?door.offset:door.offset+door.width,a=wallPoint(p.room,door.wall,pivot-17.5,0),b=wallPoint(p.room,door.wall,pivot+17.5,door.width-60);
     result.push({id:door.id,label:`Открытая входная дверь на стене ${door.wall}`,kind:'entry-door',min:vec(Math.min(a.x,b.x),0,Math.min(a.z,b.z)),max:vec(Math.max(a.x,b.x),door.height,Math.max(a.z,b.z))});
@@ -115,7 +116,7 @@ function sweepSegments(c:Cabinet,part:FrontAssembly,piece:FrontPiece){
     segments.push({poly:hull(plane),lo:Math.min(...spans),hi:Math.max(...spans),padding,points});
   }return segments;
 }
-function sweepIssue(c:Cabinet,part:FrontAssembly,obstacle:Obstacle):MotionIssue{return {id:c.id,partId:part.id,kind:obstacle.kind,otherId:obstacle.kind==='cabinet'?obstacle.id:undefined,openingId:obstacle.kind==='entry-door'?obstacle.id:undefined,severity:'warning',message:`${part.label}: при открывании пересекает ${obstacle.kind==='entry-door'?obstacle.label.toLowerCase():`габарит «${obstacle.label}»`}`};}
+function sweepIssue(c:Cabinet,part:FrontAssembly,obstacle:Obstacle):MotionIssue{return {id:c.id,partId:part.id,kind:obstacle.kind,otherId:obstacle.kind==='cabinet'?obstacle.id:undefined,openingId:obstacle.kind==='entry-door'?obstacle.id:undefined,roomObjectId:obstacle.kind==='room-object'?obstacle.id:undefined,severity:'warning',message:`${part.label}: при открывании пересекает ${obstacle.kind==='entry-door'?obstacle.label.toLowerCase():`габарит «${obstacle.label}»`}`};}
 export function auditCabinetOpening(c:Cabinet,p:Project):MotionIssue[]{
   const result:MotionIssue[]=[],obs=obstacles(p,c.id).map(o=>({o,points:obstacleBox(o).vertices.map(p=>localPoint(c,p))}));
   for(const part of frontAssemblies(c)){

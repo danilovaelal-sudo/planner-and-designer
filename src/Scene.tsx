@@ -7,6 +7,7 @@ import { WALLS, wallFrame, wallPanels } from './room';
 import type { RoomSelection } from './room';
 import { worktopLayout } from './construction';
 import { populateFronts } from './frontScene';
+import { populateRoomObjects } from './roomObjectScene';
 import { frontAssemblies, pieceVertices } from './openings';
 import type { MotionIssue, OpeningPreviews } from './openings';
 
@@ -89,6 +90,7 @@ function populate(scene:THREE.Scene,project:Project,selected:string|null,texture
       }
     }
   }
+  populateRoomObjects(root,project.room,roomSelection,textures);
   for(const c of project.cabinets) {
     const t=typeOf(c.kind),cw=c.width/1000,cd=t.depth/1000,ch=t.height/1000;
     const group=new THREE.Group();group.position.copy(offset).add(new THREE.Vector3(c.x/1000,t.elevation/1000,c.z/1000));group.rotation.y=c.rotation*Math.PI/180;group.userData.cabinetId=c.id;root.add(group);
@@ -226,7 +228,7 @@ export default function Scene({project,selected,onSelect,resetKey,onReady,camera
       const hits=raycaster.intersectObjects(scene.children,true);
       for(const hit of hits){
         let ancestor:THREE.Object3D|null=hit.object,visible=true;while(ancestor){if(!ancestor.visible)visible=false;ancestor=ancestor.parent;}if(!visible)continue;
-        let obj:THREE.Object3D|null=hit.object;while(obj){if(obj.userData.cabinetId){clickRef.current(obj.userData.cabinetId);return;}if(obj.userData.openingId){roomClickRef.current?.({kind:'opening',id:obj.userData.openingId});return;}if(obj.userData.wall){roomClickRef.current?.({kind:'wall',wall:obj.userData.wall});return;}obj=obj.parent;}
+        let obj:THREE.Object3D|null=hit.object;while(obj){if(obj.userData.cabinetId){clickRef.current(obj.userData.cabinetId);return;}if(obj.userData.roomObjectId){roomClickRef.current?.({kind:'object',id:obj.userData.roomObjectId});return;}if(obj.userData.openingId){roomClickRef.current?.({kind:'opening',id:obj.userData.openingId});return;}if(obj.userData.wall){roomClickRef.current?.({kind:'wall',wall:obj.userData.wall});return;}obj=obj.parent;}
       }
       clickRef.current(null);
     };
@@ -239,7 +241,7 @@ export default function Scene({project,selected,onSelect,resetKey,onReady,camera
   },[]);
   useEffect(()=>{
     if(!sceneRef.current) return;const textures:THREE.Texture[]=[];const scene=sceneRef.current;const root=populate(scene,project,selected,textures,roomSelection,openingPreviews,openingConflicts);dirtyRef.current=true;
-    return()=>{scene.remove(root);const materials=new Set<THREE.Material>();root.traverse(obj=>{if(obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments){obj.geometry.dispose();if(Array.isArray(obj.material))obj.material.forEach(m=>materials.add(m));else materials.add(obj.material);}});materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());};
+    return()=>{scene.remove(root);const materials=new Set<THREE.Material>();root.traverse(obj=>{if(obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments || obj instanceof THREE.Sprite){if(!(obj instanceof THREE.Sprite))obj.geometry.dispose();if(Array.isArray(obj.material))obj.material.forEach(m=>materials.add(m));else materials.add(obj.material);}});materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());};
   },[project,selected,roomSelection,openingPreviews,openingConflicts]);
   useEffect(()=>{fitRef.current();},[resetKey,project.room.width,project.room.depth,project.cabinets.length,cameraMode,zoom,cameraMode==='selected'?selected:null,Object.keys(openingPreviews).filter(id=>openingPreviews[id].progress>0).sort().join('|')]);
   return <div ref={host} className="scene-host" aria-label="Интерактивная 3D-модель кухни">{failed&&<div className="scene-error"><strong>3D недоступен в этом браузере</strong><p>Используйте вид «План 2D» или включите аппаратное ускорение.</p></div>}</div>;

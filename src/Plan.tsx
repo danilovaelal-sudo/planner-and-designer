@@ -1,3 +1,4 @@
+import { RoomObjectsPlan, RoomObjectsElevation } from './RoomObjectsDrawing';
 import { useRef, useState } from 'react';
 import { FRONTS, cabinetIssues, isFiller, snap, typeOf } from './model';
 import type { Cabinet, Project, SnapOptions, Wall } from './model';
@@ -6,7 +7,7 @@ import MotionOverlay from './MotionOverlay';
 import type { MotionIssue, OpeningPreviews } from './openings';
 import WorktopDrawing, { WorktopElevation } from './WorktopDrawing';
 import RoomDrawing, { Dimension } from './RoomDrawing';
-import { wallFrame, openingSegments } from './room';
+import { wallFrame, openingSegments, roomFloorArea } from './room';
 import type { RoomSelection } from './room';
 
 export function ModuleGlyph({kind,color='#a5ad92'}:{kind:string;color?:string}) {
@@ -43,6 +44,7 @@ export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zo
     <rect width={w} height={d} fill={showGrid?'url(#plan-grid)':project.finishes.floor==='oak'?'url(#plan-wood)':'#e8e7df'} onPointerDown={()=>onSelect(null)}/>
     <RoomDrawing room={project.room} selection={roomSelection} onSelect={onSelectRoom} arrows={roomMode}/>
     {layer==='base'&&<WorktopDrawing project={drawingProject}/>}
+    <RoomObjectsPlan room={project.room} selection={roomSelection} onSelect={roomMode?onSelectRoom:undefined} filter="solid"/>
     {!roomMode&&showOpeningZones&&<MotionOverlay project={drawingProject} previews={openingPreviews} issues={openingIssues} layer={layer} zones/>}
     {items.map(original=>{
       const c=preview?.id===original.id?preview:original,t=typeOf(c.kind),active=c.id===selected;
@@ -63,7 +65,8 @@ export default function Plan({project,selected,onSelect,onMove,layer,showGrid,zo
     {layer==='base'&&<WorktopDrawing project={drawingProject} outlineOnly/>}
     {!roomMode&&<MotionOverlay project={drawingProject} previews={openingPreviews} issues={openingIssues} layer={layer}/>}
     {!roomMode&&selected&&(()=>{const c=preview??project.cabinets.find(c=>c.id===selected);return c?<CabinetGuides cabinet={c} project={project} minPassage={minPassage}/>:null;})()}
-    <text x={70} y={d-100} className="plan-area">{(w*d/1e6).toLocaleString('ru-RU',{maximumFractionDigits:1})} м²</text>
+    <RoomObjectsPlan room={project.room} selection={roomSelection} onSelect={roomMode?onSelectRoom:undefined} filter="points"/>
+    <text x={70} y={d-100} className="plan-area">{(roomFloorArea(project.room)/1e6).toLocaleString('ru-RU',{maximumFractionDigits:1})} м²</text>
   </svg>;
 }
 export function Elevation({project,wall,selected,onSelect,roomSelection,onSelectRoom}:{project:Project;wall:Wall;selected:string|null;onSelect:(id:string|null)=>void;roomSelection?:RoomSelection;onSelectRoom?:(s:RoomSelection)=>void}) {
@@ -81,6 +84,7 @@ export function Elevation({project,wall,selected,onSelect,roomSelection,onSelect
       return <g key={c.id} onClick={()=>onSelect(c.id)} role="button" tabIndex={0} onKeyDown={e=>{if(e.key==='Enter')onSelect(c.id);}} aria-label={`${t.name}, ${c.width} мм`} className="elevation-module"><rect x={x} y={y} width={c.width} height={t.height} fill={m.color} stroke={selected===c.id?'#a5543b':'#7e8974'} strokeWidth={selected===c.id?18:6}/>{t.category!=='wall'&&<rect x={x} y={h-100} width={c.width} height="100" fill="#727b67"/>}{c.kind==='drawers'?[1,2].map(n=><path key={n} d={`M${x} ${y+(t.height-100)*n/3}h${c.width}`} stroke="#737f67" strokeWidth="6"/>):c.kind==='oven'?<rect x={x+30} y={y+80} width={c.width-60} height="580" fill="#3c483e"/>:c.kind==='open'?<>{[20,350].map(n=><rect key={n} x={x+20} y={y+n} width={c.width-40} height="300" fill="#69775d"/>)}</>:<path d={`M${x+c.width-65} ${y+120}v100`} stroke="#d6bc82" strokeWidth="16"/>}<text x={x+c.width/2} y={y+t.height/2} className="plan-size">{c.width}</text></g>;
     })}
     <WorktopElevation project={project} wall={wall}/>
+    <RoomObjectsElevation room={room} wall={wall} selection={roomSelection} onSelect={onSelectRoom}/>
     {openingSegments(room,wall).map((s,i)=><Dimension key={i} from={[s.start,h+200]} to={[s.end,h+200]} label={s.length>=150?String(s.length):''} small/>)}
     <Dimension from={[0,h+450]} to={[length,h+450]} label={`${length} мм · стена ${wall}`} onClick={()=>onSelectRoom?.({kind:'wall',wall})}/>
     <Dimension from={[-350,0]} to={[-350,h]} label={`${h} мм`} vertical/>

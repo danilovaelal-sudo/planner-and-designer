@@ -18,8 +18,21 @@ export interface Room {
   height: number;
   walls: Record<Wall, { thickness: number }>;
   openings: Opening[];
+  objects?: RoomObject[];
 }
-export type RoomSelection = { kind: 'wall'; wall: Wall } | { kind: 'opening'; id: string } | null;
+export type RoomObjectKind='box'|'column'|'radiator'|'water'|'drain'|'socket'|'gas';
+export interface RoomObject {id:string;kind:RoomObjectKind;label:string;wall:Wall;offset:number;width:number;height:number;depth:number;backGap:number;bottom:number;}
+export const ROOM_OBJECT_TYPES:{kind:RoomObjectKind;name:string;solid:boolean;color:string;symbol:string;width:number;height:number;depth:number;bottom:number;backGap:number}[]=[
+  {kind:'box',name:'Короб / выступ',solid:true,color:'#a69a86',symbol:'КР',width:400,height:2700,depth:300,bottom:0,backGap:0},
+  {kind:'column',name:'Колонна',solid:true,color:'#999f8b',symbol:'КЛ',width:300,height:2700,depth:300,bottom:0,backGap:0},
+  {kind:'radiator',name:'Радиатор',solid:true,color:'#b99479',symbol:'Р',width:800,height:600,depth:140,bottom:150,backGap:40},
+  {kind:'water',name:'Вода',solid:false,color:'#528b9c',symbol:'В',width:60,height:60,depth:35,bottom:470,backGap:0},
+  {kind:'drain',name:'Слив',solid:false,color:'#7b8594',symbol:'С',width:110,height:110,depth:80,bottom:195,backGap:0},
+  {kind:'socket',name:'Розетка',solid:false,color:'#ab8853',symbol:'Э',width:80,height:80,depth:30,bottom:1060,backGap:0},
+  {kind:'gas',name:'Газ',solid:false,color:'#af8255',symbol:'Г',width:60,height:60,depth:50,bottom:570,backGap:0},
+];
+export const roomObjectType=(kind:RoomObjectKind)=>ROOM_OBJECT_TYPES.find(t=>t.kind===kind)!;
+export type RoomSelection = { kind: 'wall'; wall: Wall } | { kind: 'opening'; id: string } | {kind:'object';id:string} | null;
 export const wallLength = (room: Room, wall: Wall) => wall === 'A' || wall === 'C' ? room.width : room.depth;
 /** Clockwise around the room. Local x follows the arrow, local y points inside. */
 export function wallFrame(room: Room, wall: Wall) {
@@ -34,6 +47,18 @@ export function wallFrame(room: Room, wall: Wall) {
 export function wallPoint(room: Room, wall: Wall, along: number, inside = 0) {
   const f = wallFrame(room, wall);
   return { x: f.x + f.ux * along + f.nx * inside, z: f.z + f.uz * along + f.nz * inside };
+}
+/** The same inside-face, wall-relative volume is used in every view and check. */
+export function roomObjectBounds(room:Room,o:RoomObject){
+  const solid=roomObjectType(o.kind).solid,a=wallPoint(room,o.wall,o.offset,o.backGap-(solid?0:o.depth/2)),b=wallPoint(room,o.wall,o.offset+o.width,o.backGap+(solid?o.depth:o.depth/2));
+  return {minX:Math.min(a.x,b.x),maxX:Math.max(a.x,b.x),minZ:Math.min(a.z,b.z),maxZ:Math.max(a.z,b.z),bottom:o.bottom,top:o.bottom+o.height};
+}
+export function roomFloorArea(room:Room){
+  const rects=(room.objects??[]).filter(o=>roomObjectType(o.kind).solid&&o.bottom===0).map(o=>roomObjectBounds(room,o));
+  const xs=[...new Set([0,room.width,...rects.flatMap(r=>[r.minX,r.maxX])])].sort((a,b)=>a-b);let occupied=0;
+  for(let i=1;i<xs.length;i++){const x=(xs[i]+xs[i-1])/2,spans=rects.filter(r=>r.minX<x&&r.maxX>x).map(r=>[r.minZ,r.maxZ]).sort((a,b)=>a[0]-b[0]);let end=-Infinity,total=0;
+    for(const [from,to] of spans){total+=Math.max(0,to-Math.max(from,end));end=Math.max(end,to);}occupied+=(xs[i]-xs[i-1])*total;
+  }return room.width*room.depth-occupied;
 }
 export function emptyRoom(width = 3600, depth = 3000, height = 2700): Room {
   return { width, depth, height, walls: { A: { thickness: 150 }, B: { thickness: 150 }, C: { thickness: 150 }, D: { thickness: 150 } }, openings: [] };
@@ -65,7 +90,28 @@ export function validateRoom(room: Room): string[] {
     const a = room.openings[i], b = room.openings[j];
     if (a.wall === b.wall && a.offset < b.offset + b.width && a.offset + a.width > b.offset && a.sill < b.sill + b.height && a.sill + a.height > b.sill) errors.push(`Проёмы на стене ${a.wall} пересекаются.`);
   }
+  if(room.objects!==undefined){
+    if(!Array.isArray(room.objects)||room.objects.length>64)return [...errors,'В комнате может быть до 64 выступов и инженерных точек.'];
+    for(const o of room.objects){
+      if(!o||typeof o!=='object'||typeof o.id!=='string'||!o.id||o.id.length>100||ids.has(o.id)||!ROOM_OBJECT_TYPES.some(t=>t.kind===o.kind)||!WALLS.includes(o.wall)||typeof o.label!=='string'||!o.label.trim()||o.label.length>60){errors.push('Некорректный элемент комнаты.');continue;}ids.add(o.id);
+      const t=roomObjectType(o.kind),limit=t.solid?4000:300;
+      if(!between(o.offset,t.solid?0:-150,8000)||!between(o.width,10,limit)||!between(o.height,10,t.solid?4500:300)||!between(o.depth,10,limit)||!between(o.backGap,0,8000)||!between(o.bottom,t.solid?0:-150,4500)||!t.solid&&(o.width!==t.width||o.height!==t.height||o.depth!==t.depth)){errors.push(`«${o.label}»: размеры должны быть целыми миллиметрами в допустимом диапазоне.`);continue;}
+      const r=roomObjectBounds(room,o);
+      if(t.solid?(r.minX<0||r.maxX>room.width||r.minZ<0||r.maxZ>room.depth):(o.offset+o.width/2<0||o.offset+o.width/2>wallLength(room,o.wall)||o.backGap>(o.wall==='A'||o.wall==='C'?room.depth:room.width)))errors.push(`«${o.label}» выходит за границы комнаты. Проверьте стену, отступ и глубину.`);
+      if(t.solid?r.top>room.height:o.bottom+o.height/2>room.height||o.bottom+o.height/2<0)errors.push(`«${o.label}»: высота должна быть в пределах комнаты.`);
+      if(t.solid&&o.backGap===0&&room.openings.some(h=>h.wall===o.wall&&h.offset<o.offset+o.width&&h.offset+h.width>o.offset&&h.sill<r.top&&h.sill+h.height>r.bottom))errors.push(`«${o.label}» перекрывает проём на стене ${o.wall}.`);
+    }
+  }
   return [...new Set(errors)];
+}
+export function newRoomObject(room:Room,kind:RoomObjectKind,wall:Wall):RoomObject|null{
+  if((room.objects?.length??0)>=64)return null;
+  const t=roomObjectType(kind),o:RoomObject={id:crypto.randomUUID(),kind,label:t.name,wall,offset:100,width:t.width,height:kind==='box'||kind==='column'?room.height:t.height,depth:t.depth,bottom:t.bottom,backGap:t.backGap};
+  const candidates=[100,0,...room.openings.filter(h=>h.wall===wall).map(h=>h.offset+h.width+100),...(room.objects??[]).filter(h=>h.wall===wall).map(h=>h.offset+h.width+100)];
+  for(const offset of candidates){const next={...o,offset},r=roomObjectBounds(room,next);
+    if(t.solid&&(room.objects??[]).filter(old=>roomObjectType(old.kind).solid).some(old=>{const b=roomObjectBounds(room,old);return r.minX<b.maxX&&r.maxX>b.minX&&r.minZ<b.maxZ&&r.maxZ>b.minZ&&r.bottom<b.top&&r.top>b.bottom;}))continue;
+    if(!validateRoom({...room,objects:[...room.objects??[],next]}).length)return next;
+  }return null;
 }
 /** Partition the wall around real rectangular holes, shared by 3D and tests. */
 export function wallPanels(room: Room, wall: Wall) {

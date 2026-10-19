@@ -7,5 +7,6 @@ import './room.css';
 import './assembly.css';
 import './construction.css';
 import './opening.css';
+import './roomObjects.css';
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);

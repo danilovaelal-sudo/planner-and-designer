@@ -1,6 +1,6 @@
-import { bounds, cabinet, cabinetIssues, cabinetWall, isFiller, placeAtWall, typeOf, wallFootprint } from './model';
+import { bounds, cabinet, cabinetIssues, cabinetWall, isFiller, placeAtWall, typeOf, wallFootprint, worktopThickness } from './model';
 import type { Cabinet, ConstructionSettings, Project } from './model';
-import { wallFrame, wallPoint } from './room';
+import { roomObjectBounds, roomObjectType, wallFrame, wallPoint } from './room';
 import type { Wall } from './room';
 
 export type Point={x:number;z:number};
@@ -74,6 +74,7 @@ export function worktopLayout(p:Project){
   const clip=(r:Rect)=>({minX:Math.max(0,r.minX),maxX:Math.min(p.room.width,r.maxX),minZ:Math.max(0,r.minZ),maxZ:Math.min(p.room.depth,r.maxZ)});
   const cutouts=p.cabinets.filter(c=>c.kind==='sink'||c.kind==='oven').map(c=>({cabinetId:c.id,kind:c.kind,rect:c.kind==='sink'?localRect(c,Math.min(c.width-160,460),320):localRect(c,480,460)}));
   const exclusions=[...cutouts.map(c=>c.rect),...p.cabinets.filter(c=>typeOf(c.kind).category==='tall').map(c=>localRect(c,c.width,typeOf(c.kind).depth+settings.frontOverhang,0,settings.frontOverhang/2))];
+  exclusions.push(...(p.room.objects??[]).filter(o=>roomObjectType(o.kind).solid&&o.bottom<870+worktopThickness(p)&&o.bottom+o.height>870).map(o=>roomObjectBounds(p.room,o)));
   const surfaces=unionSurfaces(rectangles.map(clip),exclusions);
   return {surfaces,cutouts,bridges,area:surfaces.reduce((sum,s)=>sum+s.area,0),settings};
 }
